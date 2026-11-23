@@ -76,6 +76,14 @@ private final class ParticleView: NSView {
             NSColor(srgbRed: 0.82, green: 0.91, blue: 0.93, alpha: 0).cgColor
         ] as CFArray, locations: [0, 1]
     )
+    private static let meteorGradient = CGGradient(
+        colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+        colors: [
+            NSColor(srgbRed: 0.38, green: 0.64, blue: 0.99, alpha: 0).cgColor,
+            NSColor(srgbRed: 0.64, green: 0.81, blue: 1, alpha: 0.37).cgColor,
+            NSColor(srgbRed: 0.96, green: 0.98, blue: 1, alpha: 0.92).cgColor
+        ] as CFArray, locations: [0, 0.55, 1]
+    )
     private var timer: Timer?
     private var elapsed: CGFloat = 0
     private var lastTick = 0.0
@@ -124,11 +132,16 @@ private final class ParticleView: NSView {
             return
         }
 
+        if style.effect == .starfall {
+            drawStarfall(in: context)
+            return
+        }
+
         let count: Int
         let speed: CGFloat
         let color: NSColor
         switch style.effect {
-        case .off, .mist: return
+        case .off, .mist, .starfall: return
         case .snow: (count, speed, color) = (185, 54, .white)
         case .heavySnow: (count, speed, color) = (290, 86, .white)
         case .drizzle: (count, speed, color) = (115, 290, NSColor(srgbRed: 0.80, green: 0.90, blue: 1, alpha: 1))
@@ -136,7 +149,6 @@ private final class ParticleView: NSView {
         case .leaves: (count, speed, color) = (110, 58, NSColor(srgbRed: 0.94, green: 0.58, blue: 0.20, alpha: 1))
         case .sakura: (count, speed, color) = (145, 49, NSColor(srgbRed: 1, green: 0.68, blue: 0.78, alpha: 1))
         case .fireflies: (count, speed, color) = (74, 10, NSColor(srgbRed: 1, green: 0.92, blue: 0.44, alpha: 1))
-        case .starfall: (count, speed, color) = (40, 210, NSColor(srgbRed: 0.77, green: 0.89, blue: 1, alpha: 1))
         }
 
         let divisor = style.reduceMotion ? 3 : (style.lowPower ? 2 : 1)
@@ -145,30 +157,25 @@ private final class ParticleView: NSView {
         let wind = CGFloat(style.wind) * 100
         let areaScale = min(1.35, max(0.65, sqrt(bounds.width * bounds.height / (1440 * 900))))
         let budget = min(Self.particleLimit, Int(Double(count) * style.density.multiplier * areaScale))
-        let isStarfall = style.effect == .starfall
         let isDrizzle = style.effect == .drizzle
         context.setFillColor(color.cgColor)
         context.setStrokeColor(color.cgColor)
         for p in particles.prefix(budget / divisor) {
-            let drift: CGFloat = (isStarfall ? 180 : 0) + wind
             let travel = (p.y * height + elapsed * speed * p.speed).truncatingRemainder(dividingBy: height)
-            let x = (p.x * width + elapsed * drift + sin(elapsed * 0.65 + p.phase) * 17)
+            let x = (p.x * width + elapsed * wind + sin(elapsed * 0.65 + p.phase) * 17)
                 .truncatingRemainder(dividingBy: width)
             let point = CGPoint(x: (x < 0 ? x + width : x) - 60, y: height - travel - 45)
             let r = p.size * (style.effect == .heavySnow ? 1.45 : 1.2)
             context.setAlpha(0.80)
             switch style.effect {
-            case .drizzle, .rain, .starfall:
-                let trail = r * (isStarfall ? 22 : (isDrizzle ? 4 : 10))
-                let slope = (isStarfall ? 0.83 : 0) + 0.28 * wind / 100
-                context.setAlpha(isStarfall ? 0.74 : (isDrizzle ? 0.35 : 0.59))
-                context.setLineWidth(isStarfall ? 1.6 : (isDrizzle ? 0.65 : 1.15))
+            case .drizzle, .rain:
+                let trail = r * (isDrizzle ? 4 : 10)
+                let slope = 0.28 * wind / 100
+                context.setAlpha(isDrizzle ? 0.35 : 0.59)
+                context.setLineWidth(isDrizzle ? 0.65 : 1.15)
                 context.move(to: point)
                 context.addLine(to: CGPoint(x: point.x - trail * slope, y: point.y + trail))
                 context.strokePath()
-                if isStarfall {
-                    context.fillEllipse(in: CGRect(x: point.x - 1, y: point.y - 1, width: 2, height: 2))
-                }
             case .leaves, .sakura:
                 context.saveGState()
                 context.translateBy(x: point.x, y: point.y)
@@ -209,6 +216,55 @@ private final class ParticleView: NSView {
                 context.setFillColor(gray: 1, alpha: 0.10 * (18 - cycle) / 0.12)
                 context.fill(bounds)
             }
+        }
+    }
+
+    private func drawStarfall(in context: CGContext) {
+        guard let gradient = Self.meteorGradient else { return }
+        let reduced = style.reduceMotion
+        let spacing = 2.7 / style.density.multiplier * (style.lowPower ? 1.45 : 1)
+        let current = Int(elapsed / spacing)
+        // Jitter each flight within its slot and also draw the previous slot if it overlaps.
+        for slot in max(0, current - 1)...current {
+            let p = particles[slot % particles.count]
+            let age = elapsed - CGFloat(slot) * spacing - 0.12 - p.phase / (2 * .pi) * spacing * 0.68
+            let duration = 0.65 + p.speed * 0.54
+            guard age >= 0, age < duration else { continue }
+
+            let t = age / duration
+            let alpha = min(1, t * 9, (1 - t) * 3) * (reduced ? 0.66 : 0.95)
+            let scale = min(1.35, max(0.60, bounds.width / 1440))
+            let vx = (580 + p.speed * 265) * scale * (p.x < 0.15 ? -1 : 1)
+            let vy = -(320 + p.y * 285) * scale
+            let heading = atan2(vy, vx)
+            let head = CGPoint(x: bounds.width * (0.14 + p.y * 0.56) + age * vx,
+                               y: bounds.height * (0.84 + p.x * 0.19) + age * vy)
+            let length = min(hypot(vx, vy) * age,
+                             (70 + p.size * 24) * scale * (reduced ? 0.7 : 1))
+            let radius = (0.85 + p.size * 0.36) * scale
+            guard length > 2 else { continue }
+
+            context.saveGState()
+            context.translateBy(x: head.x, y: head.y)
+            context.rotate(by: heading)
+            context.setAlpha(alpha)
+            context.saveGState()
+            context.move(to: CGPoint(x: -length, y: 0))
+            context.addQuadCurve(to: CGPoint(x: 0, y: radius),
+                                 control: CGPoint(x: -length * 0.21, y: radius * 0.40))
+            context.addLine(to: CGPoint(x: 0, y: -radius))
+            context.addQuadCurve(to: CGPoint(x: -length, y: 0),
+                                 control: CGPoint(x: -length * 0.21, y: -radius * 0.40))
+            context.closePath()
+            context.clip()
+            context.drawLinearGradient(gradient, start: CGPoint(x: -length, y: 0), end: .zero, options: [])
+            context.restoreGState()
+            context.setFillColor(gray: 1, alpha: 0.23)
+            context.fillEllipse(in: CGRect(x: -radius * 2, y: -radius * 2,
+                                           width: radius * 4, height: radius * 4))
+            context.setFillColor(gray: 1, alpha: 0.95)
+            context.fillEllipse(in: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2))
+            context.restoreGState()
         }
     }
 
