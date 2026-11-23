@@ -13,7 +13,9 @@ struct SnowSimulationTests {
         pickingUpMovesAnExistingBall()
         enteringAnotherDisplayDoesNotStartDrag()
         treeTrunkStaysOnFloor()
-        print("Passed 8 snow, crafting, and decoration regression checks")
+        cursorRollsSnowballAndPicksUpMoreSnow()
+        rollingOffLedgeRespondsToImpactSpeed()
+        print("Passed 10 snow, crafting, and decoration regression checks")
     }
 
     private static func localizedImpactAndMovingLedge() {
@@ -136,6 +138,70 @@ struct SnowSimulationTests {
         _ = craft.update(size: size, pointer: CGPoint(x: 108, y: 9), pressed: true, banks: &bank)
         _ = craft.update(size: size, pointer: drop, pressed: true, banks: &bank)
         return craft.update(size: size, pointer: drop, pressed: false, banks: &bank)
+    }
+
+    private static func cursorRollsSnowballAndPicksUpMoreSnow() {
+        var craft = SnowCraft()
+        var banks = [makeCraftBank()]
+        _ = roll(&craft, bank: &banks, to: CGPoint(x: 153, y: 13))
+        let original = craft.visibleBalls[0]
+        for index in banks[0].depths.indices where banks[0].center(of: index) >= 160 {
+            banks[0].deposit(banks[0].spacing * 25, at: banks[0].center(of: index))
+        }
+        _ = craft.update(size: size, pointer: CGPoint(x: 110, y: original.center.y), pressed: false, banks: &banks)
+        _ = craft.update(size: size, pointer: CGPoint(x: 193, y: original.center.y), pressed: false, banks: &banks)
+        let atContact = craft.visibleBalls[0].center.x
+        for _ in 0..<10 {
+            _ = craft.update(size: size, pointer: nil, pressed: false, banks: &banks)
+        }
+        let moved = craft.visibleBalls[0]
+        precondition(moved.center.x > atContact && moved.center.x > original.center.x)
+        precondition(moved.rotation < 0 && moved.radius > original.radius)
+    }
+
+    private static func rollingOffLedgeRespondsToImpactSpeed() {
+        for height: CGFloat in [20, 70, 175] {
+            var craft = SnowCraft()
+            var upper = SnowBank(edge: DesktopEdge(minX: 25, maxX: 142, y: height, id: 1))
+            for index in upper.depths.indices where upper.center(of: index) < 100 {
+                upper.deposit(upper.spacing * 16, at: upper.center(of: index))
+            }
+            var banks = [upper]
+            let start = CGPoint(x: 33, y: height + 9)
+            let drop = CGPoint(x: 121, y: height + 11)
+            _ = craft.update(size: size, pointer: start, pressed: false, banks: &banks)
+            _ = craft.update(size: size, pointer: start, pressed: true, banks: &banks)
+            _ = craft.update(size: size, pointer: drop, pressed: true, banks: &banks)
+            _ = craft.update(size: size, pointer: drop, pressed: false, banks: &banks)
+            let original = craft.visibleBalls[0]
+            _ = craft.update(size: size, pointer: CGPoint(x: 74, y: original.center.y), pressed: false, banks: &banks)
+            _ = craft.update(size: size, pointer: CGPoint(x: 174, y: original.center.y), pressed: false, banks: &banks)
+
+            var fell = false
+            var bounced = false
+            var hitFloor = false
+            var emitted: [SnowCraft.Impact] = []
+            for _ in 0..<110 {
+                _ = craft.update(size: size, pointer: nil, pressed: false, banks: &banks)
+                emitted.append(contentsOf: craft.impacts)
+                if let ball = craft.visibleBalls.first {
+                    let bottom = ball.center.y - ball.radius * (1 - ball.compression)
+                    fell = fell || (bottom > 0.01 && bottom < height - 0.01)
+                    bounced = bounced || (hitFloor && bottom > 0.01)
+                    hitFloor = hitFloor || abs(bottom) < 0.01
+                }
+            }
+            precondition(fell)
+            switch height {
+            case 20:
+                precondition(bounced && hitFloor && emitted.isEmpty && craft.visibleBalls[0].compression == 0)
+            case 70:
+                precondition(hitFloor && emitted.count == 1 && craft.visibleBalls[0].compression > 0)
+                precondition(craft.visibleBalls[0].radius < original.radius)
+            default:
+                precondition(emitted.count == 1 && emitted[0].speed >= 390 && craft.visibleBalls.isEmpty)
+            }
+        }
     }
 
     private static func treeTrunkStaysOnFloor() {

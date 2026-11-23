@@ -287,7 +287,7 @@ private struct Studio: View {
                 ))
                 .disabled(session.prefs.groundSnow != true && session.prefs.surfaceSnow != true)
                 if session.prefs.snowCrafting == true {
-                    Text("Drag through snow to make a ball. Stack three to build a snowman. Clicks still reach the app below.")
+                    Text("Drag through snow to make a ball. Nudge it with the pointer to roll it. Stack three to build a snowman. Clicks still reach the app below.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

@@ -80,12 +80,11 @@ struct SnowBank {
         return (left * spacing, right * spacing)
     }
 
-    mutating func sweep(from: CGPoint, to: CGPoint, capacity: CGFloat = .infinity) -> (x: CGFloat, height: CGFloat, mass: CGFloat)? {
+    mutating func sweep(from: CGPoint, to: CGPoint, capacity: CGFloat = .infinity, radius: CGFloat = 21) -> (x: CGFloat, height: CGFloat, mass: CGFloat)? {
         let dx = to.x - from.x
         let dy = to.y - from.y
         let distance = hypot(dx, dy)
-        guard distance >= 1 else { return nil }
-        let radius: CGFloat = 21
+        guard distance >= 0.08 else { return nil }
         guard max(from.y, to.y) + radius >= edge.y,
               min(from.x, to.x) - radius <= edge.maxX,
               max(from.x, to.x) + radius >= edge.minX else { return nil }
@@ -176,8 +175,25 @@ struct SnowSimulation {
     }
 
     mutating func updateCraft(_ craft: inout SnowCraft, size: CGSize,
-                              pointer: CGPoint?, pressed: Bool) -> CGPoint? {
-        craft.update(size: size, pointer: pointer, pressed: pressed, banks: &banks)
+                              pointer: CGPoint?, pressed: Bool, dt: CGFloat) -> CGPoint? {
+        let snowman = craft.update(size: size, pointer: pointer, pressed: pressed, dt: dt, banks: &banks)
+        for hit in craft.impacts {
+            let amount = min(hit.speed >= 390 ? 18 : 8, 160 - clumps.count)
+            let bank = banks.firstIndex { $0.edge.id == hit.surface }
+            if amount == 0 {
+                if let bank { banks[bank].deposit(hit.mass, at: hit.point.x) }
+                continue
+            }
+            let scatter = min(180, hit.speed * 0.27)
+            let mass = hit.mass / CGFloat(amount)
+            for index in 0..<amount {
+                let spread = CGFloat(index) / CGFloat(max(1, amount - 1)) * 2 - 1
+                let speed = spread * scatter + hit.sideways * 0.28
+                let rise = 24 + scatter * (0.18 + CGFloat(index % 4) * 0.21)
+                emit(mass: mass, x: hit.point.x, y: hit.point.y + 1.6, speed: speed, rise: rise)
+            }
+        }
+        return snowman
     }
 
     mutating func resetPointer() { previousPointer = nil }

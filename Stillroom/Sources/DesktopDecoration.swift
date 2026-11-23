@@ -28,7 +28,21 @@ enum DesktopDecoration {
         }
     }
 
-    static func drawSnowball(in context: CGContext, rect: CGRect) {
+    static func drawCraftBall(_ ball: SnowCraft.Ball, in context: CGContext) {
+        let radius = ball.radius
+        context.saveGState()
+        context.translateBy(x: ball.center.x, y: ball.center.y)
+        context.scaleBy(x: 1 + ball.compression * 0.55, y: 1 - ball.compression)
+        drawSnowball(in: context, rect: CGRect(x: -radius, y: -radius, width: 2 * radius, height: 2 * radius))
+        context.rotate(by: ball.rotation)
+        for (x, y, size) in [(-0.53, 0.28, 0.13), (-0.17, 0.55, 0.10), (0.38, -0.35, 0.16), (0.53, 0.14, 0.084)] {
+            ellipse(in: context, x: x * radius, y: y * radius, rx: radius * size, ry: radius * size * 0.65,
+                    color: 0x6685a2, alpha: 0.37)
+        }
+        context.restoreGState()
+    }
+
+    private static func drawSnowball(in context: CGContext, rect: CGRect) {
         shade(CGPath(ellipseIn: rect, transform: nil), in: context) {
             context.drawRadialGradient(snow,
                                        startCenter: CGPoint(x: rect.midX - rect.width * 0.15,

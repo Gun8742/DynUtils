@@ -191,7 +191,7 @@ private final class ParticleView: NSView {
             let pressing = style.snowCrafting && NSEvent.pressedMouseButtons & 1 != 0
             let crafted = style.snowCrafting
                 ? snow.updateCraft(&craft, size: bounds.size,
-                                   pointer: bounds.contains(cursor) ? cursor : nil, pressed: pressing)
+                                   pointer: bounds.contains(cursor) ? cursor : nil, pressed: pressing, dt: dt)
                 : nil
             snow.advance(dt: dt, size: bounds.size, count: count, heavy: heavy, deeper: style.deeperSnow,
                          wind: CGFloat(style.wind), pointer: pressing ? nil : pointer)
@@ -214,10 +214,7 @@ private final class ParticleView: NSView {
         if snowing {
             drawSnowBanks(in: context)
             for ball in craft.visibleBalls {
-                DesktopDecoration.drawSnowball(in: context, rect: CGRect(
-                    x: ball.center.x - ball.radius, y: ball.center.y - ball.radius,
-                    width: ball.radius * 2, height: ball.radius * 2
-                ))
+                DesktopDecoration.drawCraftBall(ball, in: context)
             }
         }
         if !style.props.isEmpty {
