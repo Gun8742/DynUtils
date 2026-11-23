@@ -46,6 +46,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     private var decorationUndo: (display: String, props: Set<DesktopProp>)?
 
     private var overlays: [String: WeatherOverlay] = [:]
+    private let screenSaver = DesktopSaver()
     private var priorWallpapers: [String: Snapshot] = [:]
     private var pauseReasons: Set<Pause> = []
     private var powerTimer: Timer?
@@ -63,7 +64,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
             nc.addObserver(self, selector: selector, name: name, object: nil)
         }
         NotificationCenter.default.addObserver(
-            self, selector: #selector(refresh), name: NSApplication.didChangeScreenParametersNotification, object: nil
+            self, selector: #selector(displayConfigurationChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil
         )
         let distributed = DistributedNotificationCenter.default()
         distributed.addObserver(self, selector: #selector(screenLocked),
@@ -84,9 +85,28 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         refresh()
     }
 
+    func applicationDidResignActive(_ notification: Notification) {
+        screenSaver.stop(restoreFocus: false)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         powerTimer?.invalidate()
+        screenSaver.onDismiss = nil
+        screenSaver.stop(restoreFocus: false)
         closeOverlays()
+    }
+
+    func showScreenSaver(_ wallpaper: Wallpaper) -> Bool {
+        guard pauseReasons.isEmpty else { return false }
+        screenSaver.onDismiss = { [weak self] in self?.reconcileWeather() }
+        guard screenSaver.show(wallpaper) else { return false }
+        reconcileWeather()
+        return true
+    }
+
+    @objc private func displayConfigurationChanged() {
+        screenSaver.stop(restoreFocus: false)
+        refresh()
     }
 
     func selectEffect(_ effect: Effect) {
@@ -273,6 +293,11 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
 
     private func reconcileWeather() {
         let effect = prefs.effect
+        if screenSaver.isRunning {
+            closeOverlays()
+            weatherStatus = effect == .off ? "Off" : "Paused: screen saver"
+            return
+        }
         let battery = onBattery
         var causes: [String] = []
         if prefs.manualPause { causes.append("manual") }
@@ -321,7 +346,12 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     }
 
     private func pause(_ reason: Pause, _ paused: Bool) {
-        if paused { pauseReasons.insert(reason) } else { pauseReasons.remove(reason) }
+        if paused {
+            pauseReasons.insert(reason)
+            screenSaver.stop(restoreFocus: false)
+        } else {
+            pauseReasons.remove(reason)
+        }
         reconcileWeather()
     }
 

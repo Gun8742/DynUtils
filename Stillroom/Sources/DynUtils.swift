@@ -68,6 +68,9 @@ private struct Studio: View {
     @State private var selectedWallpaper = Wallpaper.catalog[0].id
     @State private var target: String? = nil
     @State private var decorationDisplay: String?
+    @State private var saverSceneID = Wallpaper.catalog[0].id
+    @State private var showSaverPreview = false
+    @State private var saverError: String?
 
     private var scene: Wallpaper {
         Wallpaper.catalog.first { $0.id == selectedWallpaper } ?? Wallpaper.catalog[0]
@@ -309,7 +312,39 @@ private struct Studio: View {
                 Text("Connect a display to place decorations.").foregroundStyle(.secondary)
             }
             Divider()
+            screenSaverControls
+            Divider()
             Button("Reset preferences") { session.resetPreferences() }
+        }
+    }
+
+    private var screenSaverControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            let scene = Wallpaper.catalog.first { $0.id == saverSceneID } ?? Wallpaper.catalog[0]
+            Text("Screen Saver").font(.headline)
+            Picker("Scene", selection: $saverSceneID) {
+                ForEach(Wallpaper.catalog) { Text($0.title).tag($0.id) }
+            }.fixedSize()
+            HStack {
+                Button("Preview") { showSaverPreview = true }
+                Button("Start on all displays") {
+                    saverError = session.showScreenSaver(scene) ? nil : "Couldn’t start the screen saver."
+                }
+            }
+            Text("Press a key or move the pointer to exit. macOS controls screen locking.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let saverError { Text(saverError).foregroundStyle(.secondary) }
+        }
+        .sheet(isPresented: $showSaverPreview) {
+            let scene = Wallpaper.catalog.first { $0.id == saverSceneID } ?? Wallpaper.catalog[0]
+            VStack(alignment: .leading, spacing: 14) {
+                Text(scene.title).font(.headline)
+                wallpaperPreview(scene)
+                Button("Done") { showSaverPreview = false }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(24)
+            .frame(width: 560)
         }
     }
 }
