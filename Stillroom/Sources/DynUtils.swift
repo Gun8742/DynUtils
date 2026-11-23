@@ -68,7 +68,7 @@ private struct Studio: View {
     @State private var selectedWallpaper = Wallpaper.catalog[0].id
     @State private var target: String? = nil
     @State private var decorationDisplay: String?
-    @State private var saverSceneID = Wallpaper.catalog[0].id
+    @State private var showGuide = false
     @State private var showSaverPreview = false
     @State private var saverError: String?
 
@@ -164,6 +164,24 @@ private struct Studio: View {
                 Picker("Scene rule", selection: Binding(get: { session.prefs.rule }, set: { session.setRule($0) })) {
                     ForEach(WallpaperRule.allCases) { Text($0.title).tag($0) }
                 }
+            }
+            if session.prefs.rule == .season {
+                Toggle("Southern Hemisphere", isOn: Binding(
+                    get: { session.prefs.southernHemisphere == true },
+                    set: { session.prefs.southernHemisphere = $0; session.updateScheduledWallpaper() }
+                ))
+            }
+            if session.prefs.rule == .random {
+                Picker("Change every", selection: Binding(
+                    get: { session.prefs.randomHours ?? 3 },
+                    set: {
+                        session.prefs.randomHours = $0
+                        session.prefs.lastRandomSlot = nil
+                        session.updateScheduledWallpaper()
+                    }
+                )) {
+                    ForEach([1, 3, 6, 12, 24], id: \.self) { Text("\($0) hr").tag($0) }
+                }.fixedSize()
             }
             if session.prefs.resolution[scene.id] == .ultrawide {
                 Text("This scene uses the standard image when a wide version is unavailable.")
@@ -314,15 +332,32 @@ private struct Studio: View {
             Divider()
             screenSaverControls
             Divider()
+            Button("Guide and what’s new") { showGuide = true }
+                .sheet(isPresented: $showGuide, onDismiss: { session.previewGuideEffect(nil) }) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("DynUtils Guide").font(.title.bold())
+                        Text("Choose a demo, then look at the desktop. Closing this guide returns to your selected weather.")
+                        ForEach(Effect.allCases.filter { $0 != .off }) { effect in
+                            Button("Try \(effect.title)") { session.previewGuideEffect(effect) }
+                        }
+                        Divider()
+                        Text("What’s new").font(.headline)
+                        Text("Window snow, desktop decorations, scheduled wallpapers, and the idle screen saver.")
+                        Button("Done") { showGuide = false }.keyboardShortcut(.cancelAction)
+                    }.padding(24).frame(width: 410, alignment: .leading)
+                }
             Button("Reset preferences") { session.resetPreferences() }
         }
     }
 
     private var screenSaverControls: some View {
         VStack(alignment: .leading, spacing: 10) {
-            let scene = Wallpaper.catalog.first { $0.id == saverSceneID } ?? Wallpaper.catalog[0]
+            let scene = Wallpaper.catalog.first { $0.id == (session.prefs.saverScene ?? Wallpaper.catalog[0].id) } ?? Wallpaper.catalog[0]
             Text("Screen Saver").font(.headline)
-            Picker("Scene", selection: $saverSceneID) {
+            Picker("Scene", selection: Binding(
+                get: { session.prefs.saverScene ?? Wallpaper.catalog[0].id },
+                set: { session.prefs.saverScene = $0 }
+            )) {
                 ForEach(Wallpaper.catalog) { Text($0.title).tag($0.id) }
             }.fixedSize()
             HStack {
@@ -331,12 +366,30 @@ private struct Studio: View {
                     saverError = session.showScreenSaver(scene) ? nil : "Couldn’t start the screen saver."
                 }
             }
+            Picker("Start after inactivity", selection: Binding(
+                get: { session.prefs.saverDelay ?? 0 }, set: { session.prefs.saverDelay = $0 }
+            )) {
+                ForEach(DesktopSaver.delays, id: \.self) { delay in
+                    Text(delay == 0 ? "Off" : "\(delay) min").tag(delay)
+                }
+            }.fixedSize()
+            Toggle("Shuffle scenes on automatic starts", isOn: Binding(
+                get: { session.prefs.saverShuffle == true }, set: { session.prefs.saverShuffle = $0 }
+            ))
+            if let system = session.displaySleepMinutes, let delay = session.prefs.saverDelay,
+               delay > 0, system <= delay {
+                Text("macOS turns off the display after \(system) min. Choose a shorter DynUtils timer or adjust Lock Screen settings.")
+                    .foregroundStyle(.secondary)
+                Button("Open System Settings") {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+                }
+            }
             Text("Press a key or move the pointer to exit. macOS controls screen locking.")
                 .font(.caption).foregroundStyle(.secondary)
             if let saverError { Text(saverError).foregroundStyle(.secondary) }
         }
         .sheet(isPresented: $showSaverPreview) {
-            let scene = Wallpaper.catalog.first { $0.id == saverSceneID } ?? Wallpaper.catalog[0]
+            let scene = Wallpaper.catalog.first { $0.id == (session.prefs.saverScene ?? Wallpaper.catalog[0].id) } ?? Wallpaper.catalog[0]
             VStack(alignment: .leading, spacing: 14) {
                 Text(scene.title).font(.headline)
                 wallpaperPreview(scene)

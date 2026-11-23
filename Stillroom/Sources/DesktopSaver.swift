@@ -1,9 +1,46 @@
 import AppKit
+import IOKit.pwr_mgt
 
 /// An app-owned presentation, never a replacement for the macOS lock screen.
 @MainActor
 final class DesktopSaver {
+    static let delays = [0, 1, 2, 5, 10, 15, 30]
     private var windows: [NSWindow] = []
+
+    static var idleSeconds: TimeInterval {
+        let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .mouseMoved, .leftMouseDown,
+                                    .rightMouseDown, .otherMouseDown, .leftMouseDragged,
+                                    .rightMouseDragged, .otherMouseDragged, .scrollWheel, .tabletPointer]
+        return types.map {
+            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0)
+        }.min() ?? 0
+    }
+
+    static var mediaKeepsDisplayAwake: Bool {
+        var raw: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsStatus(&raw) == kIOReturnSuccess,
+              let values = raw?.takeRetainedValue() as? [String: NSNumber] else { return true }
+        return ["PreventUserIdleDisplaySleep", "NoDisplaySleepAssertion", "PreventSystemSleep"]
+            .contains { values[$0]?.intValue ?? 0 > 0 }
+    }
+
+    static func readDisplaySleepMinutes() -> Int? {
+        let command = Process()
+        command.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        command.arguments = ["-g"]
+        let output = Pipe()
+        command.standardOutput = output
+        command.standardError = FileHandle.nullDevice
+        guard (try? command.run()) != nil else { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let lines = String(decoding: data, as: UTF8.self).split(separator: "\n")
+        for line in lines {
+            let fields = line.split(whereSeparator: \.isWhitespace)
+            if fields.count >= 2, fields[0] == "displaysleep",
+               let minutes = Int(fields[1]), minutes > 0 { return minutes }
+        }
+        return nil
+    }
     private var inputMonitor: Any?
     private weak var previousKeyWindow: NSWindow?
     private var previousApp: NSRunningApplication?

@@ -47,6 +47,11 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
 
     private var overlays: [String: WeatherOverlay] = [:]
     private let screenSaver = DesktopSaver()
+    private var saverIdleReset = Date()
+    private var nextSaverSceneID: String?
+    private var guideEffect: Effect?
+    private var lastScheduledCheck: Date?
+    @Published private(set) var displaySleepMinutes: Int?
     private var priorWallpapers: [String: Snapshot] = [:]
     private var pauseReasons: Set<Pause> = []
     private var powerTimer: Timer?
@@ -82,6 +87,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         loginStatus = SMAppService.mainApp.status
+        displaySleepMinutes = DesktopSaver.readDisplaySleepMinutes()
         refresh()
     }
 
@@ -98,7 +104,10 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
 
     func showScreenSaver(_ wallpaper: Wallpaper) -> Bool {
         guard pauseReasons.isEmpty else { return false }
-        screenSaver.onDismiss = { [weak self] in self?.reconcileWeather() }
+        screenSaver.onDismiss = { [weak self] in
+            self?.saverIdleReset = Date()
+            self?.reconcileWeather()
+        }
         guard screenSaver.show(wallpaper) else { return false }
         reconcileWeather()
         return true
@@ -121,7 +130,56 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     func setRule(_ rule: WallpaperRule) {
         guard prefs.rule != rule else { return }
         prefs.rule = rule
+        prefs.automaticWallpaperKey = nil
         if rule == .matchEffect { applyMatchedWallpaper() }
+        else { updateScheduledWallpaper() }
+    }
+
+    func updateScheduledWallpaper(now: Date = .now, calendar: Calendar = .autoupdatingCurrent) {
+        guard pauseReasons.isEmpty, !screenSaver.isRunning else { return }
+        let salt = Wallpaper.catalog[0]
+        let amber = Wallpaper.catalog[1]
+        let key: String
+        let wallpaper: Wallpaper
+        switch prefs.rule {
+        case .manual, .matchEffect:
+            return
+        case .dayNight:
+            let hour = calendar.component(.hour, from: now)
+            wallpaper = (6..<18).contains(hour) ? amber : salt
+            key = "dayNight:" + wallpaper.id
+        case .season:
+            let month = calendar.component(.month, from: now)
+            let warm = (3...8).contains(month) != (prefs.southernHemisphere == true)
+            wallpaper = warm ? amber : salt
+            key = "season:" + wallpaper.id
+        case .random:
+            let interval = max(1, min(24, prefs.randomHours ?? 3))
+            let slot = Int(now.timeIntervalSince1970 / Double(interval * 3_600))
+            if prefs.lastRandomSlot == slot,
+               let saved = Wallpaper.catalog.first(where: { $0.id == prefs.lastRandomWallpaper }) {
+                wallpaper = saved
+            } else {
+                wallpaper = Wallpaper.catalog.filter { $0.id != prefs.lastRandomWallpaper }.randomElement() ?? salt
+                prefs.lastRandomSlot = slot
+                prefs.lastRandomWallpaper = wallpaper.id
+            }
+            key = "random:\(interval):\(slot)"
+        }
+        let screens = NSScreen.screens
+        guard !screens.isEmpty, prefs.automaticWallpaperKey != key else { return }
+        prefs.automaticWallpaperKey = key
+        prefs.defaultWallpaper = wallpaper.id
+        for screen in screens {
+            prefs.desired[screen.displayKey] = wallpaper.id
+            apply(wallpaper, on: screen)
+        }
+        readDisplays()
+    }
+
+    func previewGuideEffect(_ effect: Effect?) {
+        guideEffect = effect
+        reconcileWeather()
     }
 
     func apply(_ wallpaper: Wallpaper, to target: String?) {
@@ -289,10 +347,36 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         return IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? == kIOPSBatteryPowerValue
     }
 
-    @objc private func powerChanged() { reconcileWeather() }
+    @objc private func powerChanged() {
+        let now = Date()
+        if lastScheduledCheck.map({ now.timeIntervalSince($0) >= 20 || now < $0 }) ?? true {
+            lastScheduledCheck = now
+            updateScheduledWallpaper(now: now)
+        }
+        startSaverIfIdle(now: now)
+        reconcileWeather()
+    }
+
+    private func startSaverIfIdle(now: Date) {
+        let delay = prefs.saverDelay ?? 0
+        guard DesktopSaver.delays.contains(delay), delay > 0, prefs.onboardingComplete,
+              pauseReasons.isEmpty, !screenSaver.isRunning, guideEffect == nil,
+              now.timeIntervalSince(saverIdleReset) >= Double(delay) * 60,
+              DesktopSaver.idleSeconds >= Double(delay) * 60,
+              displaySleepMinutes.map({ delay < $0 }) ?? true,
+              !DesktopSaver.mediaKeepsDisplayAwake else { return }
+        let scene: Wallpaper
+        if prefs.saverShuffle == true {
+            scene = Wallpaper.catalog.filter { $0.id != nextSaverSceneID }.randomElement() ?? Wallpaper.catalog[0]
+            nextSaverSceneID = scene.id
+        } else {
+            scene = Wallpaper.catalog.first { $0.id == prefs.saverScene } ?? Wallpaper.catalog[0]
+        }
+        _ = showScreenSaver(scene)
+    }
 
     private func reconcileWeather() {
-        let effect = prefs.effect
+        let effect = guideEffect ?? prefs.effect
         if screenSaver.isRunning {
             closeOverlays()
             weatherStatus = effect == .off ? "Off" : "Paused: screen saver"
@@ -300,7 +384,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         }
         let battery = onBattery
         var causes: [String] = []
-        if prefs.manualPause { causes.append("manual") }
+        if prefs.manualPause, guideEffect == nil { causes.append("manual") }
         if prefs.pauseOnBattery && battery { causes.append("on battery") }
         if pauseReasons.contains(.lock) { causes.append("screen locked") }
         if pauseReasons.contains(.sleeping) { causes.append("display asleep") }
@@ -346,6 +430,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     }
 
     private func pause(_ reason: Pause, _ paused: Bool) {
+        saverIdleReset = Date()
         if paused {
             pauseReasons.insert(reason)
             screenSaver.stop(restoreFocus: false)
@@ -358,7 +443,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     @objc private func screenLocked() { pause(.lock, true) }
     @objc private func screenUnlocked() { pause(.lock, false) }
     @objc private func screenSlept() { pause(.sleeping, true) }
-    @objc private func screenWoke() { pause(.sleeping, false); refresh() }
+    @objc private func screenWoke() { pause(.sleeping, false); updateScheduledWallpaper(); refresh() }
     @objc private func sessionInactive() { pause(.inactive, true) }
     @objc private func sessionActive() { pause(.inactive, false); refresh() }
 }
