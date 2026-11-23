@@ -7,8 +7,8 @@ DynUtils เป็นแอป macOS สำหรับเปลี่ยนว�
 ใช้ macOS 14 ขึ้นไป และ Xcode หรือ Command Line Tools ที่มี Swift 6 ตรวจได้ด้วย `xcrun swiftc --version`
 
 ```sh
-git clone --branch develop https://github.com/Gun8742/DynWallpaper.git
-cd DynWallpaper
+git clone --branch develop https://github.com/Gun8742/DynUtils.git
+cd DynUtils
 ./Stillroom/build.sh
 open Stillroom/build/DynUtils.app
 ```
