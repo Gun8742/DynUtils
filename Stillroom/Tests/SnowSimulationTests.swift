@@ -26,7 +26,10 @@ struct SnowSimulationTests {
         resizingPreservesSnowMass()
         snowSlidesDownWallAndAccumulatesBelow()
         wallCollisionsRespectVisibilityAndBothSides()
-        print("Passed 20 snow, crafting, and decoration regression checks")
+        fasterWindowMovementShedsMoreSnow()
+        centerSnowLagsThenMovesForwardWhenWindowBrakes()
+        suddenDownwardMotionLiftsSnow()
+        print("Passed 23 snow, crafting, and decoration regression checks")
     }
 
     private static func localizedImpactAndMovingLedge() {
@@ -420,6 +423,77 @@ struct SnowSimulationTests {
                                              radius: 2, phase: 0)
         precondition(snow.moveFlake(&fromAbove, dt: 0.4, mass: 5) && fromAbove.wall == nil)
         precondition(snow.banks[1].depth(at: 116) > 0)
+    }
+
+    private static func fasterWindowMovementShedsMoreSnow() {
+        let original = DesktopEdge(minX: 35, maxX: 175, y: 120, id: 1)
+        var initial = SnowBank(edge: original)
+        initial.deposit(35, at: original.minX + 7)
+        initial.deposit(35, at: original.minX + 63)
+        initial.move(to: original, sampledAt: 0)
+        let dt = 1.0 / 30
+        func moved(by offset: CGFloat) -> DesktopEdge {
+            DesktopEdge(minX: original.minX + offset, maxX: original.maxX + offset, y: original.y, id: original.id)
+        }
+        var slow = initial
+        var moderate = initial
+        var fast = initial
+        slow.move(to: moved(by: 2), sampledAt: dt)
+        moderate.move(to: moved(by: 14), sampledAt: dt)
+        fast.move(to: moved(by: 36), sampledAt: dt)
+        let slowShed = slow.advanceInertia(dt: dt)
+        let moderateShed = moderate.advanceInertia(dt: dt)
+        let fastShed = fast.advanceInertia(dt: dt)
+        precondition(slowShed.isEmpty && !moderateShed.isEmpty && !fastShed.isEmpty)
+        precondition(fastShed[0].mass > moderateShed[0].mass && fastShed[0].x < fast.edge.minX)
+        precondition(abs(fast.depths.reduce(0, +) * fast.spacing + fastShed[0].mass - 70) < 0.001)
+    }
+
+    private static func centerSnowLagsThenMovesForwardWhenWindowBrakes() {
+        let edge = DesktopEdge(minX: 0, maxX: 320, y: 120, id: 1)
+        let dt = 1.0 / 30
+        var bank = SnowBank(edge: edge)
+        bank.deposit(36, at: 170)
+        bank.move(to: edge, sampledAt: 0)
+        func relativeCenter(_ bank: SnowBank) -> CGFloat {
+            let weighted = bank.depths.indices.reduce(CGFloat(0)) { result, index in
+                result + (bank.center(of: index) - bank.edge.minX) * bank.depths[index]
+            }
+            return weighted / bank.depths.reduce(0, +)
+        }
+        let original = relativeCenter(bank)
+        for frame in 1...8 {
+            let displacement = CGFloat(frame) * 19
+            let moved = DesktopEdge(minX: displacement, maxX: 320 + displacement, y: 120, id: 1)
+            bank.move(to: moved, sampledAt: CGFloat(frame) * dt)
+            precondition(bank.advanceInertia(dt: dt).isEmpty)
+        }
+        let lagged = relativeCenter(bank)
+        precondition(lagged < original - 35)
+        bank.move(to: bank.edge, sampledAt: 9 * dt)
+        precondition(bank.advanceInertia(dt: dt).isEmpty)
+        precondition(relativeCenter(bank) > lagged)
+    }
+
+    private static func suddenDownwardMotionLiftsSnow() {
+        let high = DesktopEdge(minX: 30, maxX: 200, y: 142, id: 1)
+        let low = DesktopEdge(minX: 30, maxX: 200, y: 110, id: 1)
+        let firstWall = DesktopSnowWall(windowID: 1, bounds: CGRect(x: 30, y: 62, width: 170, height: 80), foreground: [])
+        let movedWall = DesktopSnowWall(windowID: 1, bounds: CGRect(x: 30, y: 30, width: 170, height: 80), foreground: [])
+        let resizedWall = DesktopSnowWall(windowID: 1, bounds: CGRect(x: 30, y: 62, width: 170, height: 48), foreground: [])
+        let dt = 1.0 / 30
+        var snow = SnowSimulation()
+        snow.sync(width: size.width, ground: true, ledges: [high], walls: [firstWall], sampledAt: 0)
+        precondition(snow.deposit(from: CGPoint(x: 115, y: 172), to: CGPoint(x: 115, y: 139), mass: 45))
+        var resizing = snow
+        resizing.sync(width: size.width, ground: true, ledges: [low], walls: [resizedWall], sampledAt: dt)
+        step(&resizing)
+        precondition(resizing.clumps.isEmpty)
+
+        snow.sync(width: size.width, ground: true, ledges: [low], walls: [movedWall], sampledAt: dt)
+        step(&snow)
+        precondition(snow.clumps.contains { $0.position.y > low.y && $0.mass > 0 })
+        precondition(snow.banks[1].depths.allSatisfy { $0 == 0 })
     }
 
     private static func step(_ snow: inout SnowSimulation, wind: CGFloat = 0, pointer: CGPoint? = nil) {

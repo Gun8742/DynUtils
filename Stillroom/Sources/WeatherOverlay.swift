@@ -199,10 +199,12 @@ private final class ParticleView: NSView {
         let tracksSnowSurfaces = snowing && (style.surfaceSnow || style.props.contains(.snowman))
         let buttonDown = tracksSnowSurfaces && NSEvent.pressedMouseButtons & 1 != 0
         if buttonDown { followWindowsUntil = now + 0.18 }
+        var sampledAt: TimeInterval?
         if let window, (now >= nextEdgeSample || buttonDown),
            tracksSnowSurfaces || [.rain, .sakura, .starfall].contains(style.effect)
                 || (style.visit != nil && style.visit?.visitor == nil) {
             let snapshot = DesktopWindowSampler.snapshot(in: window.frame, at: now)
+            sampledAt = now
             if tracksSnowSurfaces, edges != snapshot.edges { followWindowsUntil = now + 0.18 }
             edges = snapshot.edges
             foregroundWindows = snapshot.foreground
@@ -221,7 +223,7 @@ private final class ParticleView: NSView {
 
             let ledges = style.surfaceSnow ? edges : []
             snow.sync(width: bounds.width, ground: style.groundSnow, ledges: ledges, coveredLedges: coveredLedges,
-                      walls: style.surfaceSnow ? snowWalls : [])
+                      walls: style.surfaceSnow ? snowWalls : [], sampledAt: sampledAt)
             let pressing = style.snowCrafting && NSEvent.pressedMouseButtons & 1 != 0
             let crafted = style.snowCrafting
                 ? snow.updateCraft(&craft, size: bounds.size,

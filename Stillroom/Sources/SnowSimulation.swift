@@ -1,8 +1,25 @@
 import CoreGraphics
+import Foundation
 
 struct SnowBank {
     var edge: DesktopEdge
     private(set) var depths: [CGFloat]
+    private var motion = WindowMotion()
+
+    private struct WindowMotion {
+        var sampledAt: TimeInterval?
+        var windowBottom: CGFloat?
+        var velocity = CGVector.zero
+        var slide: CGFloat = 0
+        var lift: CGFloat = 0
+    }
+
+    struct Shedding {
+        let x: CGFloat
+        let y: CGFloat
+        let mass: CGFloat
+        let velocity: CGVector
+    }
 
     init(edge: DesktopEdge) {
         self.edge = edge
@@ -27,7 +44,10 @@ struct SnowBank {
         depths[index] += mass / spacing
     }
 
-    mutating func move(to edge: DesktopEdge) {
+    mutating func move(to edge: DesktopEdge, sampledAt: TimeInterval? = nil, windowBottom: CGFloat? = nil) {
+        if let sampledAt, edge.id != -1, !edge.isDock {
+            observeMotion(to: edge, sampledAt: sampledAt, windowBottom: windowBottom)
+        }
         let width = edge.maxX - edge.minX
         if abs(width - (self.edge.maxX - self.edge.minX)) < 0.01 {
             self.edge = edge
@@ -47,7 +67,97 @@ struct SnowBank {
             resized.depths[index] = max(0, (total - previousMass) / resized.spacing)
             previousMass = total
         }
+        resized.motion = motion
         self = resized
+    }
+
+    mutating func resetMotion() { motion = WindowMotion() }
+
+    private mutating func observeMotion(to next: DesktopEdge, sampledAt: TimeInterval, windowBottom: CGFloat?) {
+        let previous = motion.sampledAt
+        if let previous, sampledAt <= previous { return }
+        let previousBottom = motion.windowBottom
+        motion.sampledAt = sampledAt
+        motion.windowBottom = windowBottom
+        guard let previous else { return }
+        let interval = sampledAt - previous
+        let left = next.minX - edge.minX
+        let right = next.maxX - edge.maxX
+        let vertical = next.y - edge.y
+        guard interval < 0.25, max(abs(left), abs(right), abs(vertical)) < 280 else {
+            motion = WindowMotion(sampledAt: sampledAt, windowBottom: windowBottom)
+            return
+        }
+
+        // Opposing or stationary edges are resizing. Only the shared displacement translates the bank.
+        func sharedDisplacement(_ first: CGFloat, _ second: CGFloat) -> CGFloat {
+            first * second > 0 ? (first < 0 ? -1 : 1) * min(abs(first), abs(second)) : 0
+        }
+        let horizontal = sharedDisplacement(left, right)
+        let bottomDelta = (windowBottom ?? 0) - (previousBottom ?? 0)
+        let rise = windowBottom != nil && previousBottom != nil ? sharedDisplacement(vertical, bottomDelta) : vertical
+        let velocity = CGVector(dx: horizontal / interval, dy: rise / interval)
+        let impulse = motion.velocity.dx - velocity.dx
+        let grip = max(42, 390 * interval)
+        let excess = max(0, abs(impulse) - grip)
+        motion.slide = min(800, max(-800, motion.slide + (impulse < 0 ? -1 : 1) * excess * 0.72))
+        let downwardsChange = motion.velocity.dy - velocity.dy
+        motion.lift = max(motion.lift, min(0.46, max(0, (downwardsChange - 180) * 0.00062)))
+        motion.velocity = velocity
+    }
+
+    mutating func advanceInertia(dt: CGFloat) -> [Shedding] {
+        let shift = motion.slide * dt / spacing
+        guard abs(shift) > 0.001 || motion.lift > 0 else { return [] }
+        var output: [Shedding] = []
+
+        if motion.lift > 0 {
+            for section in 0..<3 {
+                let start = section * depths.count / 3
+                let end = (section + 1) * depths.count / 3
+                var amount: CGFloat = 0
+                var centroid: CGFloat = 0
+                var height: CGFloat = 0
+                for index in start..<end {
+                    let taken = depths[index] * motion.lift
+                    height = max(height, depths[index])
+                    depths[index] -= taken
+                    amount += taken
+                    centroid += center(of: index) * taken
+                }
+                if amount > 0 {
+                    output.append(Shedding(x: centroid / amount, y: edge.y + height + 4,
+                                           mass: amount * spacing,
+                                           velocity: CGVector(dx: motion.velocity.dx * 0.5 + CGFloat(section - 1) * 42, dy: 6)))
+                }
+            }
+            motion.lift = 0
+        }
+
+        if abs(shift) > 0.001 {
+            let whole = Int(floor(shift))
+            let fraction = shift - CGFloat(whole)
+            let old = depths
+            depths = Array(repeating: 0, count: old.count)
+            var overflow: CGFloat = 0
+            for index in old.indices where old[index] > 0 {
+                let target = index + whole
+                let left = old[index] * (1 - fraction)
+                let right = old[index] * fraction
+                if depths.indices.contains(target) { depths[target] += left }
+                else { overflow += left }
+                if depths.indices.contains(target + 1) { depths[target + 1] += right }
+                else { overflow += right }
+            }
+            if overflow > 0 {
+                output.append(Shedding(x: shift < 0 ? edge.minX - 6 : edge.maxX + 6, y: edge.y - 0.5,
+                                       mass: overflow * spacing,
+                                       velocity: CGVector(dx: motion.velocity.dx + motion.slide, dy: min(0, motion.velocity.dy))))
+            }
+        }
+        motion.slide *= exp(-4.3 * dt)
+        if abs(motion.slide) < 3 { motion.slide = 0 }
+        return output
     }
 
     mutating func settle(dt: CGFloat, wind: CGFloat, maximum: CGFloat) -> (left: CGFloat, right: CGFloat) {
@@ -200,26 +310,34 @@ struct SnowSimulation {
     private var time: CGFloat = 0
 
     mutating func sync(width: CGFloat, ground: Bool, ledges: [DesktopEdge],
-                       coveredLedges: [Int: [ClosedRange<CGFloat>]] = [:], walls: [DesktopSnowWall] = []) {
+                       coveredLedges: [Int: [ClosedRange<CGFloat>]] = [:], walls: [DesktopSnowWall] = [],
+                       sampledAt: TimeInterval? = nil) {
         self.coveredLedges = coveredLedges
         self.walls = walls
         for id in detached.keys.filter({ (detached[$0]?.expires ?? 0) <= time }) {
             detached.removeValue(forKey: id)
             spill.removeValue(forKey: id)
         }
+        let bottoms = sampledAt == nil ? [:] : Dictionary(uniqueKeysWithValues: walls.map { ($0.windowID, $0.bounds.minY) })
         var surfaces = ledges
         if ground {
             surfaces.append(DesktopEdge(minX: 0, maxX: width, y: 0, id: -1))
         }
-        guard banks.count != surfaces.count || zip(banks, surfaces).contains(where: { $0.edge != $1 }) else { return }
+        if banks.count == surfaces.count, !zip(banks, surfaces).contains(where: { $0.edge != $1 }) {
+            if let sampledAt {
+                for index in banks.indices { banks[index].move(to: surfaces[index], sampledAt: sampledAt, windowBottom: bottoms[surfaces[index].id]) }
+            }
+            return
+        }
         var remaining = Dictionary(uniqueKeysWithValues: banks.map { ($0.edge.id, $0) })
         banks = surfaces.map { edge in
             var bank = remaining.removeValue(forKey: edge.id)
                 ?? detached.removeValue(forKey: edge.id)?.bank ?? SnowBank(edge: edge)
-            bank.move(to: edge)
+            bank.move(to: edge, sampledAt: sampledAt, windowBottom: bottoms[edge.id])
             return bank
         }
-        for (id, bank) in remaining where id != -1 {
+        for (id, var bank) in remaining where id != -1 {
+            bank.resetMotion()
             detached[id] = (bank, time + 0.75)
         }
     }
@@ -249,7 +367,10 @@ struct SnowSimulation {
         }
     }
 
-    mutating func resetPointer() { previousPointer = nil }
+    mutating func resetPointer() {
+        previousPointer = nil
+        for index in banks.indices { banks[index].resetMotion() }
+    }
 
     mutating func advance(dt: CGFloat, size: CGSize, count: Int, heavy: Bool, limits: SnowDepthLimits,
                           wind: CGFloat, pointer: CGPoint?) {
@@ -273,6 +394,19 @@ struct SnowSimulation {
 
         for index in banks.indices {
             let edge = banks[index].edge
+            for shedding in banks[index].advanceInertia(dt: dt) {
+                let available = min(5, 160 - clumps.count)
+                if available == 0 {
+                    banks[index].deposit(shedding.mass, at: shedding.x)
+                    continue
+                }
+                let count = min(available, max(1, Int(ceil(shedding.mass / 14))))
+                for fragment in 0..<count {
+                    let dispersion = CGFloat(fragment) - CGFloat(count - 1) / 2
+                    emit(mass: shedding.mass / CGFloat(count), x: shedding.x, y: shedding.y + abs(dispersion) * 0.8,
+                         speed: shedding.velocity.dx + dispersion * 14, rise: shedding.velocity.dy)
+                }
+            }
             let cap = CGFloat(edge.id == -1 ? limits.ground : limits.surfaces)
             let outflow = banks[index].settle(dt: dt, wind: wind, maximum: cap)
             if edge.id == -1 { continue }
