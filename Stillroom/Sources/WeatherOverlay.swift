@@ -11,6 +11,8 @@ final class WeatherOverlay: NSObject {
         var lowPower: Bool
         var rainbow: Bool
         var lightning: Bool
+        var groundSnow: Bool
+        var props: Set<DesktopProp>
     }
 
     private let window: NSWindow
@@ -53,7 +55,11 @@ final class WeatherOverlay: NSObject {
     }
 
     @objc private func visibilityChanged() {
-        if window.occlusionState.contains(.visible) { renderer.start() } else { renderer.stop() }
+        if window.occlusionState.contains(.visible), renderer.style.effect != .off {
+            renderer.start()
+        } else {
+            renderer.stop()
+        }
     }
 }
 
@@ -87,9 +93,17 @@ private final class ParticleView: NSView {
     private var timer: Timer?
     private var elapsed: CGFloat = 0
     private var lastTick = 0.0
+    private var nextEdgeSample: CGFloat = 0
+    private var edges: [DesktopEdge] = []
     var style: WeatherOverlay.Style {
         didSet {
-            if oldValue.effect != style.effect { elapsed = 0 }
+            guard oldValue != style else { return }
+            if oldValue.effect != style.effect {
+                elapsed = 0
+                nextEdgeSample = 0
+                edges = []
+            }
+            needsDisplay = true
         }
     }
 
@@ -126,6 +140,12 @@ private final class ParticleView: NSView {
         guard bounds.width > 0, bounds.height > 0,
               let context = NSGraphicsContext.current?.cgContext else { return }
         context.clear(dirtyRect)
+        if style.groundSnow, style.effect == .snow || style.effect == .heavySnow {
+            drawGroundSnow(in: context)
+        }
+        if !style.props.isEmpty {
+            DesktopDecoration.draw(style.props, in: context, bounds: bounds)
+        }
 
         if style.effect == .mist {
             drawMist(in: context)
@@ -222,6 +242,10 @@ private final class ParticleView: NSView {
     private func drawStarfall(in context: CGContext) {
         guard let gradient = Self.meteorGradient else { return }
         let reduced = style.reduceMotion
+        if elapsed >= nextEdgeSample, let window {
+            edges = DesktopEdge.visible(in: window.frame)
+            nextEdgeSample = elapsed + 0.25
+        }
         let spacing = 2.7 / style.density.multiplier * (style.lowPower ? 1.45 : 1)
         let current = Int(elapsed / spacing)
         // Jitter each flight within its slot and also draw the previous slot if it overlaps.
@@ -229,16 +253,25 @@ private final class ParticleView: NSView {
             let p = particles[slot % particles.count]
             let age = elapsed - CGFloat(slot) * spacing - 0.12 - p.phase / (2 * .pi) * spacing * 0.68
             let duration = 0.65 + p.speed * 0.54
-            guard age >= 0, age < duration else { continue }
-
-            let t = age / duration
-            let alpha = min(1, t * 9, (1 - t) * 3) * (reduced ? 0.66 : 0.95)
+            guard age >= 0, age < duration + 0.40 else { continue }
             let scale = min(1.35, max(0.60, bounds.width / 1440))
             let vx = (580 + p.speed * 265) * scale * (p.x < 0.15 ? -1 : 1)
             let vy = -(320 + p.y * 285) * scale
             let heading = atan2(vy, vx)
-            let head = CGPoint(x: bounds.width * (0.14 + p.y * 0.56) + age * vx,
-                               y: bounds.height * (0.84 + p.x * 0.19) + age * vy)
+            let origin = CGPoint(x: bounds.width * (0.14 + p.y * 0.56),
+                                 y: bounds.height * (0.84 + p.x * 0.19))
+            if let impact = DesktopEdge.firstImpact(from: origin, velocity: CGVector(dx: vx, dy: vy),
+                                                    before: duration, edges: edges), age >= impact {
+                if !reduced {
+                    let hit = CGPoint(x: origin.x + impact * vx, y: origin.y + impact * vy)
+                    drawSparks(in: context, at: hit, age: age - impact)
+                }
+                continue
+            }
+            guard age < duration else { continue }
+            let t = age / duration
+            let alpha = min(1, t * 9, (1 - t) * 3) * (reduced ? 0.66 : 0.95)
+            let head = CGPoint(x: origin.x + age * vx, y: origin.y + age * vy)
             let length = min(hypot(vx, vy) * age,
                              (70 + p.size * 24) * scale * (reduced ? 0.7 : 1))
             let radius = (0.85 + p.size * 0.36) * scale
@@ -266,6 +299,39 @@ private final class ParticleView: NSView {
             context.fillEllipse(in: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2))
             context.restoreGState()
         }
+    }
+
+    private func drawSparks(in context: CGContext, at hit: CGPoint, age: CGFloat) {
+        guard age < 0.40 else { return }
+        context.saveGState()
+        context.setFillColor(NSColor(srgbRed: 0.68, green: 0.86, blue: 1, alpha: 1).cgColor)
+        context.setAlpha(0.85 * (1 - age / 0.40))
+        for p in particles.prefix(11) {
+            let x = hit.x + (p.x - 0.5) * 190 * age
+            let y = hit.y + (30 + p.y * 100) * age - 140 * age * age
+            if y >= hit.y {
+                context.fillEllipse(in: CGRect(x: x, y: y, width: p.size, height: p.size))
+            }
+        }
+        context.restoreGState()
+    }
+
+    private func drawGroundSnow(in context: CGContext) {
+        let goal: CGFloat = style.effect == .heavySnow ? 19 : 11
+        let depth = max(1, goal * min(1, elapsed / 37) * style.density.multiplier)
+        context.saveGState()
+        context.setFillColor(NSColor(srgbRed: 0.86, green: 0.93, blue: 0.99, alpha: 0.74).cgColor)
+        context.move(to: .zero)
+        let segments = max(1, Int(bounds.width / 10))
+        for i in 0...segments {
+            let x = bounds.width * CGFloat(i) / CGFloat(segments)
+            let wave = 0.75 + 0.18 * sin(x * 0.026) + 0.15 * cos(x * 0.011)
+            context.addLine(to: CGPoint(x: x, y: depth * wave))
+        }
+        context.addLine(to: CGPoint(x: bounds.width, y: 0))
+        context.closePath()
+        context.fillPath()
+        context.restoreGState()
     }
 
     private func drawMist(in context: CGContext) {

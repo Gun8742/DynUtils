@@ -67,6 +67,8 @@ struct Preferences: Codable {
         get { effectDensity ?? .balanced }
         set { effectDensity = newValue }
     }
+    var groundSnow: Bool?
+    var desktopProps: [String: Set<DesktopProp>]?
     var wind = 0.0
     var rainbow = false
     var lightning = false

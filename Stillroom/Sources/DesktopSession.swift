@@ -42,6 +42,8 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     @Published private(set) var weatherStatus = "Off"
     @Published private(set) var loginStatus = SMAppService.mainApp.status
     @Published private(set) var loginError: String?
+    @Published private(set) var canUndoDecoration = false
+    private var decorationUndo: (display: String, props: Set<DesktopProp>)?
 
     private var overlays: [String: WeatherOverlay] = [:]
     private var priorWallpapers: [String: Snapshot] = [:]
@@ -153,7 +155,32 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         loginStatus = SMAppService.mainApp.status
     }
 
+    func decoration(_ prop: DesktopProp, on display: String) -> Bool {
+        prefs.desktopProps?[display]?.contains(prop) == true
+    }
+
+    func setDecoration(_ prop: DesktopProp, on display: String, enabled: Bool) {
+        var saved = prefs.desktopProps ?? [:]
+        var props = saved[display] ?? []
+        decorationUndo = (display, props)
+        canUndoDecoration = true
+        if enabled { props.insert(prop) } else { props.remove(prop) }
+        saved[display] = props.isEmpty ? nil : props
+        prefs.desktopProps = saved
+    }
+
+    func undoDecoration() {
+        guard let previous = decorationUndo else { return }
+        var saved = prefs.desktopProps ?? [:]
+        saved[previous.display] = previous.props.isEmpty ? nil : previous.props
+        prefs.desktopProps = saved
+        decorationUndo = nil
+        canUndoDecoration = false
+    }
+
     func resetPreferences() {
+        decorationUndo = nil
+        canUndoDecoration = false
         prefs = Preferences()
         refresh()
     }
@@ -253,27 +280,39 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         if pauseReasons.contains(.lock) { causes.append("screen locked") }
         if pauseReasons.contains(.sleeping) { causes.append("display asleep") }
         if pauseReasons.contains(.inactive) { causes.append("inactive session") }
-        guard effect != .off, causes.isEmpty else {
+        if !pauseReasons.isEmpty {
             closeOverlays()
             weatherStatus = effect == .off ? "Off" : "Paused: " + causes.joined(separator: ", ")
             return
         }
-        let screens = NSScreen.screens.filter { !prefs.weatherDisabled.contains($0.displayKey) }
+        let placements = prefs.desktopProps ?? [:]
+        let weatherScreens = causes.isEmpty && effect != .off
+            ? NSScreen.screens.filter { !prefs.weatherDisabled.contains($0.displayKey) } : []
+        let weatherIDs = Set(weatherScreens.map(\.displayKey))
+        let screens = NSScreen.screens.filter { weatherIDs.contains($0.displayKey) || placements[$0.displayKey]?.isEmpty == false }
         let active = Set(screens.map(\.displayKey))
         for key in overlays.keys.filter({ !active.contains($0) }) {
             overlays.removeValue(forKey: key)?.close()
         }
-        let style = WeatherOverlay.Style(
-            effect: effect, density: prefs.density, wind: prefs.wind,
-            reduceMotion: prefs.reduceMotion || workspace.accessibilityDisplayShouldReduceMotion,
-            lowPower: battery || ProcessInfo.processInfo.isLowPowerModeEnabled,
-            rainbow: prefs.rainbow, lightning: prefs.lightning
-        )
+        let reduced = prefs.reduceMotion || workspace.accessibilityDisplayShouldReduceMotion
+        let lowPower = battery || ProcessInfo.processInfo.isLowPowerModeEnabled
         for screen in screens {
-            if let overlay = overlays[screen.displayKey] { overlay.update(screen: screen, style: style) }
-            else { overlays[screen.displayKey] = WeatherOverlay(screen: screen, style: style) }
+            let id = screen.displayKey
+            let style = WeatherOverlay.Style(
+                effect: weatherIDs.contains(id) ? effect : .off, density: prefs.density, wind: prefs.wind,
+                reduceMotion: reduced, lowPower: lowPower, rainbow: prefs.rainbow,
+                lightning: prefs.lightning, groundSnow: prefs.groundSnow == true,
+                props: placements[id] ?? []
+            )
+            if let overlay = overlays[id] { overlay.update(screen: screen, style: style) }
+            else { overlays[id] = WeatherOverlay(screen: screen, style: style) }
         }
-        weatherStatus = screens.isEmpty ? "No displays enabled" : "\(effect.title) · \(screens.count) display(s)"
+        if effect == .off { weatherStatus = "Off" }
+        else if !causes.isEmpty { weatherStatus = "Paused: " + causes.joined(separator: ", ") }
+        else {
+            weatherStatus = weatherScreens.isEmpty ? "No displays enabled"
+                : "\(effect.title) · \(weatherScreens.count) display(s)"
+        }
     }
 
     private func closeOverlays() {

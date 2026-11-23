@@ -67,6 +67,7 @@ private struct Studio: View {
     @State private var section: Section = .wallpapers
     @State private var selectedWallpaper = Wallpaper.catalog[0].id
     @State private var target: String? = nil
+    @State private var decorationDisplay: String?
 
     private var scene: Wallpaper {
         Wallpaper.catalog.first { $0.id == selectedWallpaper } ?? Wallpaper.catalog[0]
@@ -241,6 +242,12 @@ private struct Studio: View {
                     .monospacedDigit().frame(width: 54)
                 Button("Reset") { session.prefs.wind = 0 }
             }
+            if session.prefs.effect == .snow || session.prefs.effect == .heavySnow {
+                Toggle("Accumulate snow at the bottom", isOn: Binding(
+                    get: { session.prefs.groundSnow == true },
+                    set: { session.prefs.groundSnow = $0 }
+                ))
+            }
             if session.prefs.effect == .rain {
                 Toggle("Rainbow", isOn: $session.prefs.rainbow)
                 Toggle("Lightning", isOn: $session.prefs.lightning)
@@ -281,6 +288,26 @@ private struct Studio: View {
                 Button("Open Login Items settings") { SMAppService.openSystemSettingsLoginItems() }
             }
             if let error = session.loginError { Text(error).foregroundStyle(.secondary) }
+            Divider()
+            Text("Desktop decorations").font(.headline)
+            if let first = session.displays.first {
+                let display = session.displays.first { $0.id == decorationDisplay } ?? first
+                Picker("Decorate display", selection: Binding(
+                    get: { display.id }, set: { decorationDisplay = $0 }
+                )) {
+                    ForEach(session.displays) { Text($0.name).tag($0.id) }
+                }.fixedSize()
+                ForEach(DesktopProp.allCases) { prop in
+                    Toggle(prop.title, isOn: Binding(
+                        get: { session.decoration(prop, on: display.id) },
+                        set: { session.setDecoration(prop, on: display.id, enabled: $0) }
+                    ))
+                }
+                Button("Undo decoration change") { session.undoDecoration() }
+                    .disabled(!session.canUndoDecoration)
+            } else {
+                Text("Connect a display to place decorations.").foregroundStyle(.secondary)
+            }
             Divider()
             Button("Reset preferences") { session.resetPreferences() }
         }
