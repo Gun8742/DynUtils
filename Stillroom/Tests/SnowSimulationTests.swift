@@ -20,7 +20,8 @@ struct SnowSimulationTests {
         legacyDeepSnowMigratesToDepthControls()
         snowmanFollowsItsWindowAndLandsOnLowerLedge()
         snowmanCanToppleOrShatter()
-        print("Passed 14 snow, crafting, and decoration regression checks")
+        snowmanSizesSurviveSavingAndAffectPhysics()
+        print("Passed 15 snow, crafting, and decoration regression checks")
     }
 
     private static func localizedImpactAndMovingLedge() {
@@ -89,14 +90,17 @@ struct SnowSimulationTests {
         _ = craft.update(size: size, pointer: start, pressed: false, banks: &banks)
         precondition(craft.visibleBalls.isEmpty && banks[0].depths.reduce(0, +) == originalMass)
 
+        var radii: [CGFloat] = []
         for count in 1...3 {
             let drop = CGPoint(x: 178, y: CGFloat(16 + (count - 1) * 15))
-            let snowman = roll(&craft, bank: &banks, to: drop)
+            let (snowman, radius) = roll(&craft, bank: &banks, to: drop)
+            radii.append(radius)
             if count < 3 {
                 precondition(snowman == nil && craft.visibleBalls.count == count)
                 precondition(craft.visibleBalls.last!.center.x == drop.x)
             } else {
-                precondition(snowman == CGPoint(x: 178, y: 0) && craft.visibleBalls.isEmpty)
+                precondition(snowman?.origin == CGPoint(x: 178, y: 0) && craft.visibleBalls.isEmpty)
+                precondition(snowman?.snowballs.parts.map { $0.width / 2 } == radii)
             }
         }
         precondition(banks[0].depths.reduce(0, +) < originalMass)
@@ -136,13 +140,14 @@ struct SnowSimulationTests {
         return bank
     }
 
-    private static func roll(_ craft: inout SnowCraft, bank: inout [SnowBank], to drop: CGPoint) -> CGPoint? {
+    private static func roll(_ craft: inout SnowCraft, bank: inout [SnowBank], to drop: CGPoint) -> (SnowCraft.CompletedSnowman?, CGFloat) {
         let start = CGPoint(x: 26, y: 9)
         _ = craft.update(size: size, pointer: start, pressed: false, banks: &bank)
         _ = craft.update(size: size, pointer: start, pressed: true, banks: &bank)
         _ = craft.update(size: size, pointer: CGPoint(x: 108, y: 9), pressed: true, banks: &bank)
         _ = craft.update(size: size, pointer: drop, pressed: true, banks: &bank)
-        return craft.update(size: size, pointer: drop, pressed: false, banks: &bank)
+        let radius = craft.visibleBalls.last!.radius
+        return (craft.update(size: size, pointer: drop, pressed: false, banks: &bank), radius)
     }
 
     private static func cursorRollsSnowballAndPicksUpMoreSnow() {
@@ -288,6 +293,28 @@ struct SnowSimulationTests {
             landed = falling.advance(dt: 1.0 / 30, width: size.width, surfaces: [floor], pointer: nil)
         }
         precondition(landed?.surface == floor.id && landed?.point.y == 0)
+    }
+
+    private static func snowmanSizesSurviveSavingAndAffectPhysics() {
+        let snowballs = SnowmanSnowballs(base: 2_500, torso: 900, head: 400)
+        let layout = DecorationLayout(x: 0.4, y: 0, snowballs: snowballs)
+        let encoded = try! JSONEncoder().encode(layout)
+        let saved = try! JSONDecoder().decode(DecorationLayout.self, from: encoded)
+        precondition(saved.snowballs == snowballs)
+        let parts = saved.snowballs!.parts
+        precondition(parts.map(\.width) == [81, 51, 36])
+        precondition(parts[0].minY == 0 && parts[2].minY < parts[1].maxY)
+
+        let old = Data(#"{"x":0.4,"y":0,"angle":0,"lights":true}"#.utf8)
+        precondition(try! JSONDecoder().decode(DecorationLayout.self, from: old).snowballs == nil)
+
+        let floor = DesktopEdge(minX: 0, maxX: size.width, y: 0, id: -1)
+        var body = SnowmanPhysics(origin: CGPoint(x: 120, y: 160), angle: 0, surfaces: [floor], snowballs: snowballs)
+        var impact: SnowCraft.Impact?
+        for _ in 0..<35 where impact == nil {
+            impact = body.advance(dt: 1.0 / 30, width: size.width, surfaces: [floor], pointer: nil)
+        }
+        precondition(impact?.mass == snowballs.totalMass)
     }
 
     private static func step(_ snow: inout SnowSimulation, wind: CGFloat = 0, pointer: CGPoint? = nil) {

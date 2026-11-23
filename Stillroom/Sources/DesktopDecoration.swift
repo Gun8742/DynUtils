@@ -15,7 +15,7 @@ enum DesktopDecoration {
             case .snowman:
                 context.translateBy(x: bounds.width * layout.x, y: bounds.height * layout.y)
                 context.rotate(by: layout.angle * .pi / 180)
-                drawSnowman(in: context)
+                drawSnowman(in: context, parts: layout.snowballs?.parts ?? SnowmanSnowballs.legacyParts)
             case .tree:
                 let placement = layout.groundedTree(in: bounds, floor: treeFloor)
                 ellipse(in: context, x: placement.origin.x, y: treeFloor + 2.5,
@@ -52,8 +52,13 @@ enum DesktopDecoration {
         }
     }
 
-    private static func drawSnowman(in context: CGContext) {
-        ellipse(in: context, x: 3, y: 1, rx: 29, ry: 5, color: 0x21394c, alpha: 0.23)
+    private static func drawSnowman(in context: CGContext, parts: [CGRect]) {
+        let references = SnowmanSnowballs.legacyParts
+        let baseRadius = parts[0].width / 2
+        ellipse(in: context, x: baseRadius * 0.12, y: 1, rx: baseRadius * 1.16,
+                ry: baseRadius * 0.2, color: 0x21394c, alpha: 0.23)
+        context.saveGState()
+        fit(references[1], to: parts[1], in: context)
         for elbow in [-1.0, 1.0] {
             let arm = CGMutablePath()
             arm.move(to: CGPoint(x: elbow * 15, y: 48))
@@ -64,12 +69,11 @@ enum DesktopDecoration {
             stroke(arm, color: 0x614e45, width: 2.4, in: context)
         }
 
-        for ball: CGRect in [CGRect(x: -25, y: 2, width: 50, height: 40),
-                             CGRect(x: -19, y: 29, width: 39, height: 38),
-                             CGRect(x: -15, y: 57, width: 33, height: 33)] {
-            drawSnowball(in: context, rect: ball)
-        }
+        context.restoreGState()
+        for ball in parts { drawSnowball(in: context, rect: ball) }
 
+        context.saveGState()
+        fit(references[1], to: parts[1], in: context)
         let tail = CGMutablePath()
         tail.move(to: CGPoint(x: 11, y: 62))
         tail.addQuadCurve(to: CGPoint(x: 20, y: 37), control: CGPoint(x: 9, y: 46))
@@ -88,6 +92,10 @@ enum DesktopDecoration {
             ellipse(in: context, x: 0, y: y, rx: 1.7, ry: 1.8, color: 0x30404c)
         }
 
+        context.restoreGState()
+
+        context.saveGState()
+        fit(references[2], to: parts[2], in: context)
         for x in [-5.0, 7.0] {
             ellipse(in: context, x: x, y: 76, rx: 1.6, ry: 1.9, color: 0x263746)
             ellipse(in: context, x: x - 0.45, y: 76.65, rx: 0.45, ry: 0.45, color: 0xffffff)
@@ -117,6 +125,13 @@ enum DesktopDecoration {
         ellipse(in: context, x: 1, y: 0, rx: 16, ry: 2.6, color: 0x26394e)
         ellipse(in: context, x: -6, y: 13, rx: 3.5, ry: 1.15, color: 0xd6e8f2, alpha: 0.71)
         context.restoreGState()
+        context.restoreGState()
+    }
+
+    private static func fit(_ reference: CGRect, to part: CGRect, in context: CGContext) {
+        context.translateBy(x: part.midX, y: part.midY)
+        context.scaleBy(x: part.width / reference.width, y: part.height / reference.height)
+        context.translateBy(x: -reference.midX, y: -reference.midY)
     }
 
     private static func drawTree(lights: Bool, in context: CGContext) {

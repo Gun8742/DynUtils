@@ -214,7 +214,9 @@ private final class ParticleView: NSView {
             if let crafted {
                 snowman = nil
                 appliedSnowmanLayout = nil
-                snowmanUpdate = .crafted(DecorationLayout(x: crafted.x / bounds.width, y: crafted.y / bounds.height))
+                snowmanUpdate = .crafted(DecorationLayout(x: crafted.origin.x / bounds.width,
+                                                          y: crafted.origin.y / bounds.height,
+                                                          snowballs: crafted.snowballs))
             } else {
                 snowmanUpdate = advanceSnowman(dt: dt, pointer: pressing ? nil : pointer)
             }
@@ -232,7 +234,8 @@ private final class ParticleView: NSView {
         let surfaces = edges + [floor]
         if appliedSnowmanLayout != saved || snowman == nil {
             let origin = CGPoint(x: bounds.width * saved.x, y: bounds.height * saved.y)
-            snowman = SnowmanPhysics(origin: origin, angle: saved.angle * .pi / 180, surfaces: surfaces)
+            snowman = SnowmanPhysics(origin: origin, angle: saved.angle * .pi / 180, surfaces: surfaces,
+                                     snowballs: saved.snowballs)
             appliedSnowmanLayout = saved
             lastSnowmanMovement = elapsed
         }
@@ -257,7 +260,7 @@ private final class ParticleView: NSView {
 
     private func renderedLayout(for body: SnowmanPhysics) -> DecorationLayout {
         DecorationLayout(x: body.origin.x / bounds.width, y: body.origin.y / bounds.height,
-                         angle: body.angle * 180 / .pi)
+                         angle: body.angle * 180 / .pi, snowballs: body.snowballs)
     }
 
     private func particleBudget(base: Int) -> Int {

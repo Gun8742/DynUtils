@@ -3,6 +3,8 @@ import CoreGraphics
 struct SnowmanPhysics {
     private(set) var origin: CGPoint
     private(set) var angle: CGFloat
+    let snowballs: SnowmanSnowballs?
+    private let parts: [CGRect]
     private var surface: DesktopEdge?
     private var speed = CGVector.zero
     private var angularSpeed: CGFloat = 0
@@ -10,9 +12,11 @@ struct SnowmanPhysics {
 
     var isResting: Bool { surface != nil && speed.dx == 0 && angularSpeed == 0 }
 
-    init(origin: CGPoint, angle: CGFloat, surfaces: [DesktopEdge]) {
+    init(origin: CGPoint, angle: CGFloat, surfaces: [DesktopEdge], snowballs: SnowmanSnowballs? = nil) {
         self.origin = origin
         self.angle = angle
+        self.snowballs = snowballs
+        parts = snowballs?.parts ?? SnowmanSnowballs.legacyParts
         surface = surfaces.filter {
             abs($0.y - origin.y) <= 8 && ($0.minX...$0.maxX).contains(origin.x)
         }.min { abs($0.y - origin.y) < abs($1.y - origin.y) }
@@ -32,7 +36,7 @@ struct SnowmanPhysics {
         previousPointer = pointer
 
         let start = origin
-        let margin = min(24, width / 2)
+        let margin = min(parts[0].width / 2, width / 2)
         origin.x = min(width - margin, max(margin, origin.x + speed.dx * dt))
         angle += angularSpeed * dt
 
@@ -86,24 +90,25 @@ struct SnowmanPhysics {
         let dy = to.y - from.y
         let length = dx * dx + dy * dy
         guard abs(dx) > 1, length < 180 * 180 else { return }
-        // Approximate the torso and head as two hit circles in the object's local coordinates.
-        let hitCircles: [(height: CGFloat, radius: CGFloat)] = [(69, 20), (40, 25)]
-        for (height, radius) in hitCircles {
-            let center = CGPoint(x: origin.x - sin(angle) * height, y: origin.y + cos(angle) * height)
+        let transform = CGAffineTransform(rotationAngle: angle)
+        for part in parts.reversed() {
+            let pivot = CGPoint(x: part.midX, y: part.midY).applying(transform)
+            let center = CGPoint(x: origin.x + pivot.x, y: origin.y + pivot.y)
+            let radius = part.width / 2
             guard dx * (center.x - from.x) > 0 else { continue }
             let t = min(1, max(0, ((center.x - from.x) * dx + (center.y - from.y) * dy) / length))
             let separation = hypot(center.x - from.x - t * dx, center.y - from.y - t * dy)
             guard separation <= radius + 5 else { continue }
             let impulse = min(1500, max(-1500, dx / max(dt, 1.0 / 30)))
             speed.dx = min(235, max(-235, speed.dx * 0.65 + impulse * 0.15))
-            angularSpeed = min(10, max(-10, angularSpeed * 0.6 - impulse * height * 0.00015))
+            angularSpeed = min(10, max(-10, angularSpeed * 0.6 - impulse * part.midY * 0.00015))
             break
         }
     }
 
     private func breakApart(on edge: DesktopEdge, sideways: CGFloat, impactSpeed: CGFloat) -> SnowCraft.Impact {
-        let x = min(edge.maxX, max(edge.minX, origin.x - sin(angle) * 28))
-        return SnowCraft.Impact(point: CGPoint(x: x, y: edge.y), mass: 840, speed: impactSpeed,
+        let x = min(edge.maxX, max(edge.minX, origin.x - sin(angle) * parts[1].midY * 0.58))
+        return SnowCraft.Impact(point: CGPoint(x: x, y: edge.y), mass: snowballs?.totalMass ?? 840, speed: impactSpeed,
                                 sideways: sideways, surface: edge.id)
     }
 }

@@ -36,11 +36,36 @@ struct DesktopVisit: Equatable {
     }
 }
 
+struct SnowmanSnowballs: Codable, Equatable {
+    let base: CGFloat
+    let torso: CGFloat
+    let head: CGFloat
+
+    var totalMass: CGFloat { base + torso + head }
+
+    static let legacyParts = [
+        CGRect(x: -25, y: 2, width: 50, height: 40),
+        CGRect(x: -19, y: 29, width: 39, height: 38),
+        CGRect(x: -15, y: 57, width: 33, height: 33)
+    ]
+
+    var parts: [CGRect] {
+        var height: CGFloat = 0
+        return [base, torso, head].map { mass in
+            let radius = SnowCraft.radius(for: mass)
+            let rect = CGRect(x: -radius, y: height, width: radius * 2, height: radius * 2)
+            height += radius * 1.77
+            return rect
+        }
+    }
+}
+
 struct DecorationLayout: Codable, Equatable {
     var x: CGFloat
     var y: CGFloat
     var angle: CGFloat = 0
     var lights = true
+    var snowballs: SnowmanSnowballs?
 
     static func initial(_ prop: DesktopProp) -> Self {
         prop == .snowman ? Self(x: 0.14, y: 0.015) : Self(x: 0.84, y: 0)

@@ -194,7 +194,7 @@ struct SnowSimulation {
     }
 
     mutating func updateCraft(_ craft: inout SnowCraft, size: CGSize,
-                              pointer: CGPoint?, pressed: Bool, dt: CGFloat) -> CGPoint? {
+                              pointer: CGPoint?, pressed: Bool, dt: CGFloat) -> SnowCraft.CompletedSnowman? {
         let snowman = craft.update(size: size, pointer: pointer, pressed: pressed, dt: dt, banks: &banks)
         for hit in craft.impacts { scatter(hit) }
         return snowman

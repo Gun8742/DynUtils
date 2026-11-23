@@ -1,6 +1,12 @@
 import CoreGraphics
 
 struct SnowCraft {
+    struct CompletedSnowman {
+        let origin: CGPoint
+        let snowballs: SnowmanSnowballs
+    }
+
+
     struct Ball {
         let center: CGPoint
         let radius: CGFloat
@@ -163,7 +169,7 @@ struct SnowCraft {
     private var readyForPress = false
 
     mutating func update(size: CGSize, pointer: CGPoint?, pressed: Bool, dt: CGFloat = 1.0 / 30,
-                         banks: inout [SnowBank]) -> CGPoint? {
+                         banks: inout [SnowBank]) -> CompletedSnowman? {
         let floor = DesktopEdge(minX: 0, maxX: size.width, y: 0, id: Self.floorID)
         let ledges = banks.map(\.edge).filter { $0.id != Self.floorID }
         let surfaces = ledges + [floor]
@@ -174,7 +180,7 @@ struct SnowCraft {
             if let impact = result.impact { impacts.append(impact) }
             if !result.alive { stacks.remove(at: index) }
         }
-        var snowman: CGPoint?
+        var snowman: CompletedSnowman?
 
         if let point = pointer {
             if pressed, readyForPress, !observedPress {
@@ -226,7 +232,7 @@ struct SnowCraft {
     }
 
     private mutating func putDown(at point: CGPoint, floor: DesktopEdge, ledges: [DesktopEdge],
-                                  banks: inout [SnowBank]) -> CGPoint? {
+                                  banks: inout [SnowBank]) -> CompletedSnowman? {
         defer {
             observedPress = false
             heldMass = 0
@@ -250,7 +256,10 @@ struct SnowCraft {
         }) {
             stacks[index].balls.append(heldMass)
             guard stacks[index].balls.count == 3 else { return nil }
-            return stacks.remove(at: index).base
+            let stack = stacks.remove(at: index)
+            return CompletedSnowman(origin: stack.base, snowballs: SnowmanSnowballs(
+                base: stack.balls[0], torso: stack.balls[1], head: stack.balls[2]
+            ))
         }
 
         if stacks.count >= Self.stackLimit { stacks.removeFirst() }
@@ -263,5 +272,5 @@ struct SnowCraft {
         return nil
     }
 
-    private static func radius(for mass: CGFloat) -> CGFloat { 3 + sqrt(mass) * 0.75 }
+    static func radius(for mass: CGFloat) -> CGFloat { 3 + sqrt(mass) * 0.75 }
 }
