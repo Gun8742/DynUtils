@@ -117,8 +117,11 @@ private final class ParticleView: NSView {
     private var timer: Timer?
     private var elapsed: CGFloat = 0
     private var lastTick = 0.0
-    private var nextEdgeSample: CGFloat = 0
+    private var nextEdgeSample: TimeInterval = 0
+    private var followWindowsUntil: TimeInterval = 0
     private var edges: [DesktopEdge] = []
+    private var foregroundWindows: [Int: [CGRect]] = [:]
+    private var coveredLedges: [Int: [ClosedRange<CGFloat>]] = [:]
     private var snow = SnowSimulation()
     private var craft = SnowCraft()
     private var snowman: SnowmanPhysics?
@@ -134,6 +137,8 @@ private final class ParticleView: NSView {
                 elapsed = 0
                 nextEdgeSample = 0
                 edges = []
+                foregroundWindows = [:]
+                coveredLedges = [:]
                 snow = SnowSimulation()
                 craft = SnowCraft()
                 lastSnowmanMovement = 0
@@ -166,6 +171,7 @@ private final class ParticleView: NSView {
     func start() {
         guard timer == nil else { return }
         lastTick = CACurrentMediaTime()
+        nextEdgeSample = 0
         let tick = Timer(timeInterval: 1.0 / 30, target: self,
                          selector: #selector(redraw), userInfo: nil, repeats: true)
         tick.tolerance = 0.004
@@ -188,11 +194,18 @@ private final class ParticleView: NSView {
         lastTick = now
         if style.effect == .off, style.visit?.expired != false { stop() }
 
-        if let window, elapsed >= nextEdgeSample,
-           (snowing && (style.surfaceSnow || style.props.contains(.snowman))) || [.rain, .sakura, .starfall].contains(style.effect)
+        let tracksSnowSurfaces = snowing && (style.surfaceSnow || style.props.contains(.snowman))
+        let buttonDown = tracksSnowSurfaces && NSEvent.pressedMouseButtons & 1 != 0
+        if buttonDown { followWindowsUntil = now + 0.18 }
+        if let window, (now >= nextEdgeSample || buttonDown),
+           tracksSnowSurfaces || [.rain, .sakura, .starfall].contains(style.effect)
                 || (style.visit != nil && style.visit?.visitor == nil) {
-            edges = DesktopEdge.visible(in: window.frame)
-            nextEdgeSample = elapsed + 0.12
+            let snapshot = DesktopWindowSampler.snapshot(in: window.frame, at: now)
+            if tracksSnowSurfaces, edges != snapshot.edges { followWindowsUntil = now + 0.18 }
+            edges = snapshot.edges
+            foregroundWindows = snapshot.foreground
+            coveredLedges = snapshot.coveredLedges
+            nextEdgeSample = tracksSnowSurfaces && now < followWindowsUntil ? now : now + 0.06
         }
 
         if snowing, let frame = window?.frame, bounds.width > 0, bounds.height > 0 {
@@ -204,7 +217,7 @@ private final class ParticleView: NSView {
             let pointer = bounds.insetBy(dx: -25, dy: -25).contains(cursor) ? cursor : nil
 
             let ledges = style.surfaceSnow ? edges : []
-            snow.sync(width: bounds.width, ground: style.groundSnow, ledges: ledges)
+            snow.sync(width: bounds.width, ground: style.groundSnow, ledges: ledges, coveredLedges: coveredLedges)
             let pressing = style.snowCrafting && NSEvent.pressedMouseButtons & 1 != 0
             let crafted = style.snowCrafting
                 ? snow.updateCraft(&craft, size: bounds.size,
@@ -539,6 +552,23 @@ private final class ParticleView: NSView {
         let rim = NSColor(srgbRed: 0.97, green: 0.99, blue: 1, alpha: 0.91).cgColor
         for bank in snow.banks {
             let base = bank.edge.y
+            let maxDepth = bank.depths.max() ?? 0
+            guard maxDepth >= 0.45 else { continue }
+            let band = CGRect(x: bank.edge.minX - 1, y: base - 1,
+                              width: bank.edge.maxX - bank.edge.minX + 2, height: maxDepth + 2)
+                .intersection(bounds)
+            guard !band.isNull, !band.isEmpty else { continue }
+
+            context.saveGState()
+            defer { context.restoreGState() }
+            for window in foregroundWindows[bank.edge.id] ?? [] {
+                let covered = band.intersection(window)
+                guard !covered.isNull, !covered.isEmpty else { continue }
+                context.beginPath()
+                context.addRect(band)
+                context.addRect(covered)
+                context.clip(using: .evenOdd)
+            }
             var column = 0
             while column < bank.depths.count {
                 guard bank.depths[column] >= 0.45 else {

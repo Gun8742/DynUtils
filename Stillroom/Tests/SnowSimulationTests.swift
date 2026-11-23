@@ -21,7 +21,10 @@ struct SnowSimulationTests {
         snowmanFollowsItsWindowAndLandsOnLowerLedge()
         snowmanCanToppleOrShatter()
         snowmanSizesSurviveSavingAndAffectPhysics()
-        print("Passed 15 snow, crafting, and decoration regression checks")
+        foregroundWindowsCoverOnlyTheirOverlaps()
+        snowPersistsAcrossABriefWindowTransition()
+        resizingPreservesSnowMass()
+        print("Passed 18 snow, crafting, and decoration regression checks")
     }
 
     private static func localizedImpactAndMovingLedge() {
@@ -315,6 +318,54 @@ struct SnowSimulationTests {
             impact = body.advance(dt: 1.0 / 30, width: size.width, surfaces: [floor], pointer: nil)
         }
         precondition(impact?.mass == snowballs.totalMass)
+    }
+
+    private static func foregroundWindowsCoverOnlyTheirOverlaps() {
+        let frame = CGRect(origin: .zero, size: size)
+        let front = DesktopWindowSnapshot.Surface(id: 1, bounds: CGRect(x: 82, y: 35, width: 65, height: 135))
+        let back = DesktopWindowSnapshot.Surface(id: 2, bounds: CGRect(x: -35, y: 24, width: 249, height: 91))
+        let dock = DesktopWindowSnapshot.Surface(id: 3, bounds: CGRect(x: 20, y: 0, width: 190, height: 53), isDock: true)
+        let menu = DesktopWindowSnapshot.Surface(id: 4, bounds: CGRect(x: 54, y: 57, width: 88, height: 75), isDock: true)
+        let snapshot = DesktopWindowSnapshot(frame: frame, surfaces: [dock, menu, front, back])
+        precondition(snapshot.edges.map(\.id) == [3, 1, 2])
+        precondition(snapshot.edges[2].minX == -35 && snapshot.edges[2].maxX == 214)
+        precondition(snapshot.coveredLedges[2] == [82...147] && snapshot.coveredLedges[1] == nil)
+        precondition(snapshot.foreground[2] == [dock.bounds, front.bounds])
+
+        var snow = SnowSimulation()
+        snow.sync(width: size.width, ground: false, ledges: snapshot.edges, coveredLedges: snapshot.coveredLedges)
+        precondition(!snow.deposit(from: CGPoint(x: 95, y: 155), to: CGPoint(x: 95, y: 70), mass: 24))
+        precondition(snow.deposit(from: CGPoint(x: 180, y: 155), to: CGPoint(x: 180, y: 70), mass: 24))
+        let reordered = DesktopWindowSnapshot(frame: frame, surfaces: [dock, back, front])
+        snow.sync(width: size.width, ground: false, ledges: reordered.edges, coveredLedges: reordered.coveredLedges)
+        precondition(snow.banks.first(where: { $0.edge.id == 2 })!.depth(at: 180) > 0)
+        precondition(snow.deposit(from: CGPoint(x: 95, y: 155), to: CGPoint(x: 95, y: 70), mass: 24))
+    }
+
+    private static func snowPersistsAcrossABriefWindowTransition() {
+        var snow = SnowSimulation()
+        let edge = DesktopEdge(minX: 45, maxX: 185, y: 90, id: 1)
+        snow.sync(width: size.width, ground: false, ledges: [edge])
+        precondition(snow.deposit(from: CGPoint(x: 95, y: 150), to: CGPoint(x: 95, y: 65), mass: 24))
+        snow.sync(width: size.width, ground: false, ledges: [])
+        precondition(snow.banks.isEmpty)
+        precondition(!snow.deposit(from: CGPoint(x: 95, y: 150), to: CGPoint(x: 95, y: 65), mass: 24))
+        for _ in 0..<10 { step(&snow) }
+        snow.sync(width: size.width, ground: false, ledges: [edge])
+        precondition(snow.banks[0].depth(at: 95) > 0)
+
+        snow.sync(width: size.width, ground: false, ledges: [])
+        for _ in 0..<30 { step(&snow) }
+        snow.sync(width: size.width, ground: false, ledges: [edge])
+        precondition(snow.banks[0].depths.allSatisfy { $0 == 0 })
+    }
+
+    private static func resizingPreservesSnowMass() {
+        var bank = SnowBank(edge: DesktopEdge(minX: 25, maxX: 81, y: 120, id: 1))
+        bank.deposit(56, at: bank.center(of: 3))
+        bank.move(to: DesktopEdge(minX: -20, maxX: 106, y: 120, id: 1))
+        precondition(abs(bank.depths.reduce(0, +) * bank.spacing - 56) < 0.001)
+        precondition(bank.depths.filter { $0 > 0 }.count > 1)
     }
 
     private static func step(_ snow: inout SnowSimulation, wind: CGFloat = 0, pointer: CGPoint? = nil) {

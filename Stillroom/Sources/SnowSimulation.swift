@@ -34,10 +34,18 @@ struct SnowBank {
             return
         }
         var resized = SnowBank(edge: edge)
-        // Keep snow attached to the same relative position on the ledge when it resizes.
-        for index in depths.indices where depths[index] > 0 {
-            let position = (CGFloat(index) + 0.5) / CGFloat(depths.count)
-            resized.deposit(depths[index] * spacing, at: edge.minX + width * position)
+        var prefix: [CGFloat] = [0]
+        for depth in depths {
+            prefix.append(prefix[prefix.count - 1] + depth * spacing)
+        }
+        // Integrate over each new bin so resizing cannot concentrate a whole old bin in one column.
+        var previousMass: CGFloat = 0
+        for index in resized.depths.indices {
+            let boundary = CGFloat(index + 1) * CGFloat(depths.count) / CGFloat(resized.depths.count)
+            let oldBin = min(depths.count - 1, Int(boundary))
+            let total = prefix[oldBin] + (boundary - CGFloat(oldBin)) * depths[oldBin] * spacing
+            resized.depths[index] = max(0, (total - previousMass) / resized.spacing)
+            previousMass = total
         }
         self = resized
     }
@@ -175,10 +183,18 @@ struct SnowSimulation {
     private(set) var flakes: [Flake] = []
     private(set) var clumps: [Flake] = []
     private var spill: [Int: CGVector] = [:]
+    private var detached: [Int: (bank: SnowBank, expires: CGFloat)] = [:]
+    private var coveredLedges: [Int: [ClosedRange<CGFloat>]] = [:]
     private var previousPointer: CGPoint?
     private var time: CGFloat = 0
 
-    mutating func sync(width: CGFloat, ground: Bool, ledges: [DesktopEdge]) {
+    mutating func sync(width: CGFloat, ground: Bool, ledges: [DesktopEdge],
+                       coveredLedges: [Int: [ClosedRange<CGFloat>]] = [:]) {
+        self.coveredLedges = coveredLedges
+        for id in detached.keys.filter({ (detached[$0]?.expires ?? 0) <= time }) {
+            detached.removeValue(forKey: id)
+            spill.removeValue(forKey: id)
+        }
         var surfaces = ledges
         if ground {
             surfaces.append(DesktopEdge(minX: 0, maxX: width, y: 0, id: -1))
@@ -186,11 +202,14 @@ struct SnowSimulation {
         guard banks.count != surfaces.count || zip(banks, surfaces).contains(where: { $0.edge != $1 }) else { return }
         var remaining = Dictionary(uniqueKeysWithValues: banks.map { ($0.edge.id, $0) })
         banks = surfaces.map { edge in
-            var bank = remaining.removeValue(forKey: edge.id) ?? SnowBank(edge: edge)
+            var bank = remaining.removeValue(forKey: edge.id)
+                ?? detached.removeValue(forKey: edge.id)?.bank ?? SnowBank(edge: edge)
             bank.move(to: edge)
             return bank
         }
-        for id in remaining.keys { spill.removeValue(forKey: id) }
+        for (id, bank) in remaining where id != -1 {
+            detached[id] = (bank, time + 0.75)
+        }
     }
 
     mutating func updateCraft(_ craft: inout SnowCraft, size: CGSize,
@@ -310,10 +329,11 @@ struct SnowSimulation {
         var hit: Int?
         var time: CGFloat = 2
         for index in banks.indices {
-            if let impact = banks[index].impact(from: start, to: end), impact < time {
-                hit = index
-                time = impact
-            }
+            guard let impact = banks[index].impact(from: start, to: end), impact < time else { continue }
+            let x = start.x + (end.x - start.x) * impact
+            if coveredLedges[banks[index].edge.id]?.contains(where: { $0.contains(x) }) == true { continue }
+            hit = index
+            time = impact
         }
         guard let hit else { return false }
         banks[hit].deposit(mass, at: start.x + (end.x - start.x) * time)
