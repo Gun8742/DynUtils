@@ -268,6 +268,14 @@ private struct Studio: View {
                     get: { session.prefs.groundSnow == true },
                     set: { session.prefs.groundSnow = $0 }
                 ))
+                Toggle("Accumulate snow on windows and Dock", isOn: Binding(
+                    get: { session.prefs.surfaceSnow == true },
+                    set: { session.prefs.surfaceSnow = $0 }
+                ))
+                Toggle("Deeper snow", isOn: Binding(
+                    get: { session.prefs.deeperSnow == true },
+                    set: { session.prefs.deeperSnow = $0 }
+                ))
             }
             if session.prefs.effect == .rain {
                 Toggle("Rainbow", isOn: $session.prefs.rainbow)

@@ -12,6 +12,8 @@ final class WeatherOverlay: NSObject {
         var rainbow: Bool
         var lightning: Bool
         var groundSnow: Bool
+        var surfaceSnow: Bool
+        var deeperSnow: Bool
         var props: Set<DesktopProp>
     }
 
@@ -95,6 +97,9 @@ private final class ParticleView: NSView {
     private var lastTick = 0.0
     private var nextEdgeSample: CGFloat = 0
     private var edges: [DesktopEdge] = []
+    private var edgeDepth: [Int: CGFloat] = [:]
+    private var pointer = CGPoint(x: -.infinity, y: -.infinity)
+    private var pointerStillSince: CGFloat = 0
     var style: WeatherOverlay.Style {
         didSet {
             guard oldValue != style else { return }
@@ -102,6 +107,7 @@ private final class ParticleView: NSView {
                 elapsed = 0
                 nextEdgeSample = 0
                 edges = []
+                edgeDepth = [:]
             }
             needsDisplay = true
         }
@@ -140,8 +146,26 @@ private final class ParticleView: NSView {
         guard bounds.width > 0, bounds.height > 0,
               let context = NSGraphicsContext.current?.cgContext else { return }
         context.clear(dirtyRect)
-        if style.groundSnow, style.effect == .snow || style.effect == .heavySnow {
-            drawGroundSnow(in: context)
+        let snowing = style.effect == .snow || style.effect == .heavySnow
+        if let window, elapsed >= nextEdgeSample,
+           (snowing && (style.surfaceSnow || !edgeDepth.isEmpty)) || [.rain, .sakura, .starfall].contains(style.effect) {
+            edges = DesktopEdge.visible(in: window.frame)
+            edgeDepth = edgeDepth.filter { id, _ in edges.contains { $0.id == id } }
+            for edge in edges where snowing {
+                let previous = edgeDepth[edge.id] ?? 0
+                let maximum: CGFloat = style.deeperSnow ? 16 : 9
+                let depth = style.surfaceSnow ? min(maximum, previous + 0.35) : max(0, previous - 0.8)
+                edgeDepth[edge.id] = depth > 0 ? depth : nil
+            }
+            nextEdgeSample = elapsed + 0.25
+        }
+        if snowing {
+            if style.groundSnow { drawGroundSnow(in: context) }
+            for edge in edges {
+                if let height = edgeDepth[edge.id] {
+                    drawDrift(in: context, from: edge.minX, to: edge.maxX, base: edge.y, depth: height)
+                }
+            }
         }
         if !style.props.isEmpty {
             DesktopDecoration.draw(style.props, in: context, bounds: bounds)
@@ -178,18 +202,49 @@ private final class ParticleView: NSView {
         let areaScale = min(1.35, max(0.65, sqrt(bounds.width * bounds.height / (1440 * 900))))
         let budget = min(Self.particleLimit, Int(Double(count) * style.density.multiplier * areaScale))
         let isDrizzle = style.effect == .drizzle
+        if let frame = window?.frame, style.effect == .leaves || style.effect == .fireflies {
+            let mouse = NSEvent.mouseLocation
+            let next = CGPoint(x: mouse.x - frame.minX, y: mouse.y - frame.minY)
+            if hypot(next.x - pointer.x, next.y - pointer.y) >= 2 {
+                pointer = next
+                pointerStillSince = elapsed
+            }
+        }
         context.setFillColor(color.cgColor)
         context.setStrokeColor(color.cgColor)
         for p in particles.prefix(budget / divisor) {
             let travel = (p.y * height + elapsed * speed * p.speed).truncatingRemainder(dividingBy: height)
             let x = (p.x * width + elapsed * wind + sin(elapsed * 0.65 + p.phase) * 17)
                 .truncatingRemainder(dividingBy: width)
-            let point = CGPoint(x: (x < 0 ? x + width : x) - 60, y: height - travel - 45)
+            var point = CGPoint(x: (x < 0 ? x + width : x) - 60, y: height - travel - 45)
+            let dx = point.x - pointer.x
+            let dy = point.y - pointer.y
+            let proximity = hypot(dx, dy)
+            if !style.reduceMotion && proximity > 0, proximity < 150 {
+                if style.effect == .leaves, elapsed - pointerStillSince < 0.38 {
+                    let displacement = (1 - proximity / 150) * 26
+                    point.x += dx / proximity * displacement
+                    point.y += dy / proximity * displacement
+                } else if style.effect == .fireflies {
+                    let attraction = min(1, max(0, elapsed - pointerStillSince - 0.75)) * 0.38
+                    point.x -= dx * attraction
+                    point.y -= dy * attraction
+                }
+            }
             let r = p.size * (style.effect == .heavySnow ? 1.45 : 1.2)
             context.setAlpha(0.80)
             switch style.effect {
             case .drizzle, .rain:
                 let trail = r * (isDrizzle ? 4 : 10)
+                if !isDrizzle, !style.reduceMotion,
+                   let edge = DesktopEdge.nearby(x: point.x, y: point.y, height: 10, edges: edges) {
+                    context.setAlpha(0.45)
+                    for offset in [-5.0, 4.0] {
+                        context.fillEllipse(in: CGRect(x: point.x + offset, y: edge.y + abs(offset) * 0.6,
+                                                       width: 2, height: 2))
+                    }
+                    continue
+                }
                 let slope = 0.28 * wind / 100
                 context.setAlpha(isDrizzle ? 0.35 : 0.59)
                 context.setLineWidth(isDrizzle ? 0.65 : 1.15)
@@ -197,6 +252,10 @@ private final class ParticleView: NSView {
                 context.addLine(to: CGPoint(x: point.x - trail * slope, y: point.y + trail))
                 context.strokePath()
             case .leaves, .sakura:
+                if style.effect == .sakura,
+                   let edge = DesktopEdge.nearby(x: point.x, y: point.y, height: 17, edges: edges) {
+                    point.y = edge.y + 1
+                }
                 context.saveGState()
                 context.translateBy(x: point.x, y: point.y)
                 context.rotate(by: elapsed * p.speed + p.phase)
@@ -242,10 +301,6 @@ private final class ParticleView: NSView {
     private func drawStarfall(in context: CGContext) {
         guard let gradient = Self.meteorGradient else { return }
         let reduced = style.reduceMotion
-        if elapsed >= nextEdgeSample, let window {
-            edges = DesktopEdge.visible(in: window.frame)
-            nextEdgeSample = elapsed + 0.25
-        }
         let spacing = 2.7 / style.density.multiplier * (style.lowPower ? 1.45 : 1)
         let current = Int(elapsed / spacing)
         // Jitter each flight within its slot and also draw the previous slot if it overlaps.
@@ -319,16 +374,22 @@ private final class ParticleView: NSView {
     private func drawGroundSnow(in context: CGContext) {
         let goal: CGFloat = style.effect == .heavySnow ? 19 : 11
         let depth = max(1, goal * min(1, elapsed / 37) * style.density.multiplier)
+        drawDrift(in: context, from: 0, to: bounds.width, base: 0,
+                  depth: depth * (style.deeperSnow ? 1.6 : 1))
+    }
+
+    private func drawDrift(in context: CGContext, from start: CGFloat, to end: CGFloat,
+                           base: CGFloat, depth: CGFloat) {
         context.saveGState()
         context.setFillColor(NSColor(srgbRed: 0.86, green: 0.93, blue: 0.99, alpha: 0.74).cgColor)
-        context.move(to: .zero)
-        let segments = max(1, Int(bounds.width / 10))
+        context.move(to: CGPoint(x: start, y: base))
+        let segments = max(1, Int((end - start) / 10))
         for i in 0...segments {
-            let x = bounds.width * CGFloat(i) / CGFloat(segments)
-            let wave = 0.75 + 0.18 * sin(x * 0.026) + 0.15 * cos(x * 0.011)
-            context.addLine(to: CGPoint(x: x, y: depth * wave))
+            let x = start + (end - start) * CGFloat(i) / CGFloat(segments)
+            let wave = 0.75 + 0.18 * sin((x - start) * 0.026) + 0.15 * cos((x - start) * 0.011)
+            context.addLine(to: CGPoint(x: x, y: base + depth * wave))
         }
-        context.addLine(to: CGPoint(x: bounds.width, y: 0))
+        context.addLine(to: CGPoint(x: end, y: base))
         context.closePath()
         context.fillPath()
         context.restoreGState()

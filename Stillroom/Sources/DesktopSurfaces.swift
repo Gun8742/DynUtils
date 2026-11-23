@@ -4,6 +4,8 @@ struct DesktopEdge {
     let minX: CGFloat
     let maxX: CGFloat
     let y: CGFloat
+    var id: Int = 0
+    var isDock = false
 
     static func firstImpact(from origin: CGPoint, velocity: CGVector, before end: CGFloat,
                             edges: [Self]) -> CGFloat? {
@@ -16,13 +18,22 @@ struct DesktopEdge {
         }.min()
     }
 
+    static func nearby(x: CGFloat, y: CGFloat, height: CGFloat, edges: [Self]) -> Self? {
+        edges.first { edge in
+            x >= edge.minX && x <= edge.maxX && y >= edge.y && y - edge.y < height
+        }
+    }
+
     @MainActor
     static func visible(in frame: CGRect) -> [Self] {
         guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                        kCGNullWindowID) as? [[String: Any]] else { return [] }
         let mainTop = CGDisplayBounds(CGMainDisplayID()).height
         return Array(windows.lazy.compactMap { info -> Self? in
-            guard (info[kCGWindowLayer as String] as? Int) == 0,
+            let dockLayer = Int(CGWindowLevelForKey(.dockWindow))
+            guard let layer = info[kCGWindowLayer as String] as? Int,
+                  let id = info[kCGWindowNumber as String] as? Int,
+                  layer == 0 || (layer == dockLayer && (info[kCGWindowOwnerName as String] as? String) == "Dock"),
                   (info[kCGWindowAlpha as String] as? Double ?? 1) > 0.05,
                   let raw = info[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: raw),
@@ -31,7 +42,10 @@ struct DesktopEdge {
             let right = min(frame.maxX, rect.maxX)
             let top = mainTop - rect.minY
             guard left < right, top > frame.minY, top < frame.maxY else { return nil }
-            return Self(minX: left - frame.minX, maxX: right - frame.minX, y: top - frame.minY)
+            let isDock = layer == dockLayer
+            if isDock && rect.width >= frame.width * 0.95 && rect.height >= frame.height * 0.95 { return nil }
+            return Self(minX: left - frame.minX, maxX: right - frame.minX, y: top - frame.minY,
+                        id: id, isDock: isDock)
         }.prefix(24))
     }
 }

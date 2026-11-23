@@ -411,6 +411,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
                 effect: weatherIDs.contains(id) ? effect : .off, density: prefs.density, wind: prefs.wind,
                 reduceMotion: reduced, lowPower: lowPower, rainbow: prefs.rainbow,
                 lightning: prefs.lightning, groundSnow: prefs.groundSnow == true,
+                surfaceSnow: prefs.surfaceSnow == true, deeperSnow: prefs.deeperSnow == true,
                 props: placements[id] ?? []
             )
             if let overlay = overlays[id] { overlay.update(screen: screen, style: style) }
