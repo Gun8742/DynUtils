@@ -1,6 +1,6 @@
 import AppKit
 
-struct DesktopEdge {
+struct DesktopEdge: Equatable {
     let minX: CGFloat
     let maxX: CGFloat
     let y: CGFloat

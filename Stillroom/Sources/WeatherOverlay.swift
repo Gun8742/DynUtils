@@ -108,7 +108,7 @@ private final class ParticleView: NSView {
     private var lastTick = 0.0
     private var nextEdgeSample: CGFloat = 0
     private var edges: [DesktopEdge] = []
-    private var edgeDepth: [Int: CGFloat] = [:]
+    private var snow = SnowSimulation()
     private var pointer = CGPoint(x: -.infinity, y: -.infinity)
     private var pointerStillSince: CGFloat = 0
     var style: WeatherOverlay.Style {
@@ -118,11 +118,14 @@ private final class ParticleView: NSView {
                 elapsed = 0
                 nextEdgeSample = 0
                 edges = []
-                edgeDepth = [:]
+                snow = SnowSimulation()
             }
+            if oldValue.surfaceSnow != style.surfaceSnow { nextEdgeSample = 0 }
             needsDisplay = true
         }
     }
+
+    private var snowing: Bool { style.effect == .snow || style.effect == .heavySnow }
 
     init(frame: NSRect, style: WeatherOverlay.Style) {
         self.style = style
@@ -144,42 +147,49 @@ private final class ParticleView: NSView {
     func stop() {
         timer?.invalidate()
         timer = nil
+        snow.resetPointer()
     }
 
     @objc private func redraw() {
         let now = CACurrentMediaTime()
-        elapsed += min(now - lastTick, 0.1) * (style.reduceMotion ? 0.35 : 1)
+        let dt = min(now - lastTick, 0.067) * (style.reduceMotion ? 0.35 : 1)
+        elapsed += dt
         lastTick = now
         if style.effect == .off, style.visit?.expired != false { stop() }
+
+        if let window, elapsed >= nextEdgeSample,
+           (snowing && style.surfaceSnow) || [.rain, .sakura, .starfall].contains(style.effect)
+                || (style.visit != nil && style.visit?.visitor == nil) {
+            edges = DesktopEdge.visible(in: window.frame)
+            nextEdgeSample = elapsed + 0.12
+        }
+
+        if snowing, let frame = window?.frame, bounds.width > 0, bounds.height > 0 {
+            let heavy = style.effect == .heavySnow
+            let divisor = style.reduceMotion ? 3 : (style.lowPower ? 2 : 1)
+            let count = particleBudget(base: heavy ? 290 : 185) / divisor
+            let mouse = NSEvent.mouseLocation
+            let cursor = CGPoint(x: mouse.x - frame.minX, y: mouse.y - frame.minY)
+            let pointer = bounds.insetBy(dx: -25, dy: -25).contains(cursor) ? cursor : nil
+
+            let ledges = style.surfaceSnow ? edges : []
+            snow.sync(width: bounds.width, ground: style.groundSnow, ledges: ledges)
+            snow.advance(dt: dt, size: bounds.size, count: count, heavy: heavy, deeper: style.deeperSnow,
+                         wind: CGFloat(style.wind), pointer: pointer)
+        }
         needsDisplay = true
+    }
+
+    private func particleBudget(base: Int) -> Int {
+        let areaScale = min(1.35, max(0.65, sqrt(bounds.width * bounds.height / (1440 * 900))))
+        return min(Self.particleLimit, Int(Double(base) * style.density.multiplier * areaScale))
     }
 
     override func draw(_ dirtyRect: NSRect) {
         guard bounds.width > 0, bounds.height > 0,
               let context = NSGraphicsContext.current?.cgContext else { return }
         context.clear(dirtyRect)
-        let snowing = style.effect == .snow || style.effect == .heavySnow
-        if let window, elapsed >= nextEdgeSample,
-           (snowing && (style.surfaceSnow || !edgeDepth.isEmpty))
-                || [.rain, .sakura, .starfall].contains(style.effect) || (style.visit != nil && style.visit?.visitor == nil) {
-            edges = DesktopEdge.visible(in: window.frame)
-            edgeDepth = edgeDepth.filter { id, _ in edges.contains { $0.id == id } }
-            for edge in edges where snowing {
-                let previous = edgeDepth[edge.id] ?? 0
-                let maximum: CGFloat = style.deeperSnow ? 16 : 9
-                let depth = style.surfaceSnow ? min(maximum, previous + 0.35) : max(0, previous - 0.8)
-                edgeDepth[edge.id] = depth > 0 ? depth : nil
-            }
-            nextEdgeSample = elapsed + 0.25
-        }
-        if snowing {
-            if style.groundSnow { drawGroundSnow(in: context) }
-            for edge in edges {
-                if let height = edgeDepth[edge.id] {
-                    drawDrift(in: context, from: edge.minX, to: edge.maxX, base: edge.y, depth: height)
-                }
-            }
-        }
+        if snowing { drawSnowBanks(in: context) }
         if !style.props.isEmpty {
             DesktopDecoration.draw(style.props, layouts: style.layouts, in: context, bounds: bounds)
         }
@@ -202,8 +212,9 @@ private final class ParticleView: NSView {
         let color: NSColor
         switch style.effect {
         case .off, .mist, .starfall: return
-        case .snow: (count, speed, color) = (185, 54, .white)
-        case .heavySnow: (count, speed, color) = (290, 86, .white)
+        case .snow, .heavySnow:
+            drawFallingSnow(in: context)
+            return
         case .drizzle: (count, speed, color) = (115, 290, NSColor(srgbRed: 0.80, green: 0.90, blue: 1, alpha: 1))
         case .rain: (count, speed, color) = (245, 490, NSColor(srgbRed: 0.70, green: 0.84, blue: 1, alpha: 1))
         case .leaves: (count, speed, color) = (110, 58, NSColor(srgbRed: 0.94, green: 0.58, blue: 0.20, alpha: 1))
@@ -215,8 +226,7 @@ private final class ParticleView: NSView {
         let height = bounds.height + 90
         let width = bounds.width + 120
         let wind = CGFloat(style.wind) * 100
-        let areaScale = min(1.35, max(0.65, sqrt(bounds.width * bounds.height / (1440 * 900))))
-        let budget = min(Self.particleLimit, Int(Double(count) * style.density.multiplier * areaScale))
+        let budget = particleBudget(base: count)
         let isDrizzle = style.effect == .drizzle
         if let frame = window?.frame, style.effect == .leaves || style.effect == .fireflies {
             let mouse = NSEvent.mouseLocation
@@ -247,7 +257,7 @@ private final class ParticleView: NSView {
                     point.y -= dy * attraction
                 }
             }
-            let r = p.size * (style.effect == .heavySnow ? 1.45 : 1.2)
+            let r = p.size * 1.2
             context.setAlpha(0.80)
             switch style.effect {
             case .drizzle, .rain:
@@ -430,28 +440,60 @@ private final class ParticleView: NSView {
         context.restoreGState()
     }
 
-    private func drawGroundSnow(in context: CGContext) {
-        let goal: CGFloat = style.effect == .heavySnow ? 19 : 11
-        let depth = max(1, goal * min(1, elapsed / 37) * style.density.multiplier)
-        drawDrift(in: context, from: 0, to: bounds.width, base: 0,
-                  depth: depth * (style.deeperSnow ? 1.6 : 1))
+    private func drawSnowBanks(in context: CGContext) {
+        let body = NSColor(srgbRed: 0.80, green: 0.89, blue: 0.98, alpha: 0.88).cgColor
+        let rim = NSColor(srgbRed: 0.97, green: 0.99, blue: 1, alpha: 0.91).cgColor
+        for bank in snow.banks {
+            let base = bank.edge.y
+            var column = 0
+            while column < bank.depths.count {
+                guard bank.depths[column] >= 0.45 else {
+                    column += 1
+                    continue
+                }
+                let start = column
+                while column < bank.depths.count, bank.depths[column] >= 0.45 { column += 1 }
+
+                let left = max(bank.edge.minX, bank.center(of: start) - bank.spacing)
+                let right = min(bank.edge.maxX, bank.center(of: column - 1) + bank.spacing)
+                let contour = CGMutablePath()
+                contour.move(to: CGPoint(x: left, y: base))
+                var previous = CGPoint(x: left, y: base)
+                for index in start...column {
+                    let point = index == column ? CGPoint(x: right, y: base)
+                        : CGPoint(x: bank.center(of: index), y: base + bank.depths[index])
+                    let third = (point.x - previous.x) / 3
+                    contour.addCurve(to: point,
+                                     control1: CGPoint(x: previous.x + third, y: previous.y),
+                                     control2: CGPoint(x: point.x - third, y: point.y))
+                    previous = point
+                }
+
+                context.addPath(contour)
+                context.closePath()
+                context.setFillColor(body)
+                context.fillPath()
+                context.addPath(contour)
+                context.setStrokeColor(rim)
+                context.setLineWidth(0.85)
+                context.strokePath()
+            }
+        }
     }
 
-    private func drawDrift(in context: CGContext, from start: CGFloat, to end: CGFloat,
-                           base: CGFloat, depth: CGFloat) {
-        context.saveGState()
-        context.setFillColor(NSColor(srgbRed: 0.86, green: 0.93, blue: 0.99, alpha: 0.74).cgColor)
-        context.move(to: CGPoint(x: start, y: base))
-        let segments = max(1, Int((end - start) / 10))
-        for i in 0...segments {
-            let x = start + (end - start) * CGFloat(i) / CGFloat(segments)
-            let wave = 0.75 + 0.18 * sin((x - start) * 0.026) + 0.15 * cos((x - start) * 0.011)
-            context.addLine(to: CGPoint(x: x, y: base + depth * wave))
+    private func drawFallingSnow(in context: CGContext) {
+        context.setFillColor(NSColor.white.withAlphaComponent(0.84).cgColor)
+        for flake in snow.flakes {
+            let diameter = flake.radius * 2
+            context.fillEllipse(in: CGRect(x: flake.position.x - flake.radius, y: flake.position.y - flake.radius,
+                                           width: diameter, height: diameter))
         }
-        context.addLine(to: CGPoint(x: end, y: base))
-        context.closePath()
-        context.fillPath()
-        context.restoreGState()
+        context.setFillColor(NSColor(srgbRed: 0.86, green: 0.94, blue: 1, alpha: 0.94).cgColor)
+        for clump in snow.clumps {
+            let radius = clump.radius
+            context.fillEllipse(in: CGRect(x: clump.position.x - radius, y: clump.position.y - radius,
+                                           width: radius * 2, height: radius * 1.45))
+        }
     }
 
     private func drawMist(in context: CGContext) {
