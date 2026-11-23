@@ -62,6 +62,11 @@ struct Wallpaper: Identifiable {
     }
 }
 
+enum InterfaceLanguage: String {
+    case english = "en"
+    case thai = "th"
+}
+
 struct Preferences: Codable {
     var onboardingComplete = false
     var effect: Effect = .off
@@ -91,7 +96,11 @@ struct Preferences: Codable {
     var decorationLayouts: [String: [DesktopProp: DecorationLayout]]?
     var automaticVisitors: Set<DesktopVisitor>?
     var routeVisitorsAcrossDisplays: Bool?
-    var interfaceLanguage: String?
+    private var interfaceLanguage: String?
+    var language: InterfaceLanguage {
+        get { interfaceLanguage.flatMap(InterfaceLanguage.init(rawValue:)) ?? .english }
+        set { interfaceLanguage = newValue.rawValue }
+    }
     var effectsAboveWindows: Bool?
     var wind = 0.0
     var rainbow = false

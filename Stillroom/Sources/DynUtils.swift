@@ -319,13 +319,9 @@ private struct Studio: View {
             }
             Divider()
             Text("Power & motion").font(.headline)
-            Picker("Language", selection: Binding(
-                get: { session.prefs.interfaceLanguage ?? "system" },
-                set: { session.prefs.interfaceLanguage = $0 }
-            )) {
-                Text("System language").tag("system")
-                Text("English").tag("en")
-                Text("ไทย").tag("th")
+            Picker("Language", selection: $session.prefs.language) {
+                Text(verbatim: "English").tag(InterfaceLanguage.english)
+                Text(verbatim: "ไทย").tag(InterfaceLanguage.thai)
             }.fixedSize()
             Toggle("Show effects above windows", isOn: Binding(
                 get: { session.prefs.effectsAboveWindows == true },

@@ -4,6 +4,7 @@
 <dict>
     <key>CFBundleExecutable</key><string>DynUtils</string>
     <key>CFBundleIdentifier</key><string>local.stillroom.app</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleDisplayName</key><string>DynUtils</string>
     <key>CFBundleName</key><string>DynUtils</string>
     <key>CFBundlePackageType</key><string>APPL</string>

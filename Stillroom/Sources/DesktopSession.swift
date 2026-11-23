@@ -45,8 +45,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     @Published private(set) var canUndoDecoration = false
     private var decorationUndo: (display: String, props: Set<DesktopProp>, layouts: [DesktopProp: DecorationLayout])?
     var interfaceLocale: Locale {
-        guard let language = prefs.interfaceLanguage, language != "system" else { return .autoupdatingCurrent }
-        return Locale(identifier: language)
+        Locale(identifier: prefs.language.rawValue)
     }
     private var desktopVisits: [String: DesktopVisit] = [:]
     private var nextAutomaticVisit = Date().addingTimeInterval(120)
