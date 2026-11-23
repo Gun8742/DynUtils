@@ -39,6 +39,7 @@ final class WeatherOverlay: NSObject {
         window.hidesOnDeactivate = false
         window.level = Self.level(aboveWindows: style.aboveWindows)
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
+        renderer.treeFloor = max(0, screen.visibleFrame.minY - screen.frame.minY)
         window.contentView = renderer
         NotificationCenter.default.addObserver(
             self, selector: #selector(visibilityChanged),
@@ -53,6 +54,7 @@ final class WeatherOverlay: NSObject {
         if style.aboveWindows != renderer.style.aboveWindows {
             window.level = Self.level(aboveWindows: style.aboveWindows)
         }
+        renderer.treeFloor = max(0, screen.visibleFrame.minY - screen.frame.minY)
         renderer.style = style
         visibilityChanged()
     }
@@ -129,6 +131,10 @@ private final class ParticleView: NSView {
             if oldValue.surfaceSnow != style.surfaceSnow { nextEdgeSample = 0 }
             needsDisplay = true
         }
+    }
+
+    var treeFloor: CGFloat = 0 {
+        didSet { if oldValue != treeFloor { needsDisplay = true } }
     }
 
     private var snowing: Bool { style.effect == .snow || style.effect == .heavySnow }
@@ -215,7 +221,8 @@ private final class ParticleView: NSView {
             }
         }
         if !style.props.isEmpty {
-            DesktopDecoration.draw(style.props, layouts: style.layouts, in: context, bounds: bounds)
+            DesktopDecoration.draw(style.props, layouts: style.layouts, in: context, bounds: bounds,
+                                   treeFloor: treeFloor)
         }
 
         if let visit = style.visit, visit.age >= 0, !visit.expired {

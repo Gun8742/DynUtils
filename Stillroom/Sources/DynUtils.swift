@@ -352,12 +352,10 @@ private struct Studio: View {
                 )) {
                     ForEach(session.displays) { Text($0.name).tag($0.id) }
                 }.fixedSize()
-                ForEach(DesktopProp.allCases) { prop in
-                    Toggle(LocalizedStringKey(prop.title), isOn: Binding(
-                        get: { session.decoration(prop, on: display.id) },
-                        set: { session.setDecoration(prop, on: display.id, enabled: $0) }
-                    ))
-                }
+                Toggle("Tree", isOn: Binding(
+                    get: { session.decoration(.tree, on: display.id) },
+                    set: { session.setDecoration(.tree, on: display.id, enabled: $0) }
+                ))
                 DecorationEditor(session: session, display: display.id)
                 Button("Throw snowball") { session.throwSnowball(on: display.id) }
                 Button("Undo decoration change") { session.undoDecoration() }

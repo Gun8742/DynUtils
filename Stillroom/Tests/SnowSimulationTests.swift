@@ -12,7 +12,8 @@ struct SnowSimulationTests {
         draggingUsesBankSnowAndStacksThreeBalls()
         pickingUpMovesAnExistingBall()
         enteringAnotherDisplayDoesNotStartDrag()
-        print("Passed 7 snow physics and crafting regression checks")
+        treeTrunkStaysOnFloor()
+        print("Passed 8 snow, crafting, and decoration regression checks")
     }
 
     private static func localizedImpactAndMovingLedge() {
@@ -135,6 +136,19 @@ struct SnowSimulationTests {
         _ = craft.update(size: size, pointer: CGPoint(x: 108, y: 9), pressed: true, banks: &bank)
         _ = craft.update(size: size, pointer: drop, pressed: true, banks: &bank)
         return craft.update(size: size, pointer: drop, pressed: false, banks: &bank)
+    }
+
+    private static func treeTrunkStaysOnFloor() {
+        let display = CGRect(origin: .zero, size: size)
+        for floor: CGFloat in [0, 48] {
+            for angle: CGFloat in [0, 15, -30, 345, 150] {
+                let saved = DecorationLayout(x: 0.8, y: 0.63, angle: angle)
+                let tree = saved.groundedTree(in: display, floor: floor)
+                let trunk = DecorationLayout.treeTrunk.applying(CGAffineTransform(rotationAngle: tree.radians))
+                precondition(abs(tree.origin.y + trunk.minY - floor) < 0.001)
+                precondition(abs(tree.origin.x - display.width * saved.x) < 0.001)
+            }
+        }
     }
 
     private static func step(_ snow: inout SnowSimulation, wind: CGFloat = 0, pointer: CGPoint? = nil) {

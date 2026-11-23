@@ -245,10 +245,11 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     }
 
     func setDecoration(_ prop: DesktopProp, on display: String, enabled: Bool) {
+        guard !enabled || prop == .tree else { return }
         var saved = prefs.desktopProps ?? [:]
         var props = saved[display] ?? []
+        guard props.contains(prop) != enabled else { return }
         rememberDecorations(on: display)
-        canUndoDecoration = true
         if enabled { props.insert(prop) }
         else {
             props.remove(prop)

@@ -7,15 +7,22 @@ enum DesktopDecoration {
     private static let needles = gradient([0x69a789, 0x2d695a, 0x163c3b], at: [0, 0.45, 1])
 
     static func draw(_ props: Set<DesktopProp>, layouts: [DesktopProp: DecorationLayout],
-                     in context: CGContext, bounds: CGRect) {
+                     in context: CGContext, bounds: CGRect, treeFloor: CGFloat = 0) {
         for prop in DesktopProp.allCases where props.contains(prop) {
             let layout = layouts[prop] ?? .initial(prop)
             context.saveGState()
-            context.translateBy(x: bounds.width * layout.x, y: bounds.height * layout.y)
-            context.rotate(by: layout.angle * .pi / 180)
             switch prop {
-            case .snowman: drawSnowman(in: context)
-            case .tree: drawTree(lights: layout.lights, in: context)
+            case .snowman:
+                context.translateBy(x: bounds.width * layout.x, y: bounds.height * layout.y)
+                context.rotate(by: layout.angle * .pi / 180)
+                drawSnowman(in: context)
+            case .tree:
+                let placement = layout.groundedTree(in: bounds, floor: treeFloor)
+                ellipse(in: context, x: placement.origin.x, y: treeFloor + 2.5,
+                        rx: 25, ry: 2.5, color: 0x1b3943, alpha: 0.32)
+                context.translateBy(x: placement.origin.x, y: placement.origin.y)
+                context.rotate(by: placement.radians)
+                drawTree(lights: layout.lights, in: context)
             }
             context.restoreGState()
         }
@@ -99,11 +106,8 @@ enum DesktopDecoration {
     }
 
     private static func drawTree(lights: Bool, in context: CGContext) {
-        ellipse(in: context, x: 2, y: 1, rx: 35, ry: 5, color: 0x1b3943, alpha: 0.29)
         context.setFillColor(color(0x614d41))
-        context.addPath(CGPath(roundedRect: CGRect(x: -5, y: 0, width: 11, height: 24),
-                               cornerWidth: 2, cornerHeight: 2, transform: nil))
-        context.fillPath()
+        context.fill(DecorationLayout.treeTrunk)
         context.setFillColor(color(0x96755a))
         context.fill(CGRect(x: -3, y: 3, width: 1.8, height: 15))
         for (center, base, width, height) in [(0.0, 13.0, 39.0, 55.0), (-2, 36, 30, 49), (1, 57, 23, 42)] {
