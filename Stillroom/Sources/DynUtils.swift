@@ -3,16 +3,16 @@ import ServiceManagement
 import SwiftUI
 
 @main
-struct Stillroom: App {
+struct DynUtils: App {
     @NSApplicationDelegateAdaptor(DesktopSession.self) private var session
 
     var body: some Scene {
-        Window("Stillroom", id: "main") {
+        Window("DynUtils", id: "main") {
             Studio(session: session)
         }
         .defaultSize(width: 900, height: 660)
 
-        MenuBarExtra("Stillroom", systemImage: "cloud.snow") {
+        MenuBarExtra("DynUtils", systemImage: "cloud.snow") {
             QuickControls(session: session)
         }
     }
@@ -40,12 +40,12 @@ private struct QuickControls: View {
             }
         }
         Divider()
-        Button("Open Stillroom") {
+        Button("Open DynUtils") {
             openWindow(id: "main")
             NSApp.activate()
         }
         .keyboardShortcut("o")
-        Button("Quit Stillroom") { NSApp.terminate(nil) }
+        Button("Quit DynUtils") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
 }
@@ -91,7 +91,7 @@ private struct Studio: View {
         } else {
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Stillroom").font(.title2.bold()).padding(.bottom, 10)
+                    Text("DynUtils").font(.title2.bold()).padding(.bottom, 10)
                     ForEach(Section.allCases) { item in
                         Button { section = item } label: {
                             Label(item.rawValue.capitalized, systemImage: item.icon)
