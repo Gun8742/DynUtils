@@ -213,11 +213,11 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     }
 
     private func readDisplays() {
-        let previous = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0.appliedWallpaper) })
+        let previouslyApplied = Set(displays.filter { $0.appliedWallpaper != nil }.map(\.id))
         displays = NSScreen.screens.map { screen in
             let applied = workspace.desktopImageURL(for: screen).flatMap(wallpaperID(for:))
             let id = screen.displayKey
-            if applied == nil, previous[id] != nil, results[id]?.hasPrefix("Applied ") == true {
+            if applied == nil, previouslyApplied.contains(id), results[id]?.hasPrefix("Applied ") == true {
                 results[id] = nil
             }
             return Display(id: id, name: screen.localizedName, appliedWallpaper: applied)
