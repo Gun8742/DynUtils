@@ -3,6 +3,12 @@ import QuartzCore
 
 @MainActor
 final class WeatherOverlay: NSObject {
+    enum SnowmanUpdate {
+        case crafted(DecorationLayout)
+        case rested(DecorationLayout)
+        case shattered
+    }
+
     struct Style: Equatable {
         var effect: Effect
         var density: EffectDensity
@@ -13,7 +19,8 @@ final class WeatherOverlay: NSObject {
         var lightning: Bool
         var groundSnow: Bool
         var surfaceSnow: Bool
-        var deeperSnow: Bool
+        var snowDepth: SnowDepthLimits
+        var snowmanPhysics: Bool
         var snowCrafting: Bool
         var props: Set<DesktopProp>
         var layouts: [DesktopProp: DecorationLayout]
@@ -24,7 +31,7 @@ final class WeatherOverlay: NSObject {
     private let window: NSWindow
     private let renderer: ParticleView
 
-    init(screen: NSScreen, style: Style, onSnowman: @escaping (DecorationLayout) -> Void) {
+    init(screen: NSScreen, style: Style, onSnowman: @escaping (WeatherOverlay.SnowmanUpdate) -> Void) {
         window = NSWindow(contentRect: screen.frame, styleMask: .borderless,
                           backing: .buffered, defer: false, screen: screen)
         renderer = ParticleView(frame: NSRect(origin: .zero, size: screen.frame.size), style: style,
@@ -114,7 +121,10 @@ private final class ParticleView: NSView {
     private var edges: [DesktopEdge] = []
     private var snow = SnowSimulation()
     private var craft = SnowCraft()
-    private let onSnowman: (DecorationLayout) -> Void
+    private var snowman: SnowmanPhysics?
+    private var appliedSnowmanLayout: DecorationLayout?
+    private var lastSnowmanMovement: CGFloat = 0
+    private let onSnowman: (WeatherOverlay.SnowmanUpdate) -> Void
     private var pointer = CGPoint(x: -.infinity, y: -.infinity)
     private var pointerStillSince: CGFloat = 0
     var style: WeatherOverlay.Style {
@@ -126,9 +136,15 @@ private final class ParticleView: NSView {
                 edges = []
                 snow = SnowSimulation()
                 craft = SnowCraft()
+                lastSnowmanMovement = 0
+                snowman?.resetPointer()
             }
             if oldValue.snowCrafting != style.snowCrafting { craft = SnowCraft() }
-            if oldValue.surfaceSnow != style.surfaceSnow { nextEdgeSample = 0 }
+            if oldValue.surfaceSnow != style.surfaceSnow || oldValue.props != style.props { nextEdgeSample = 0 }
+            if !style.props.contains(.snowman) {
+                snowman = nil
+                appliedSnowmanLayout = nil
+            }
             needsDisplay = true
         }
     }
@@ -139,7 +155,7 @@ private final class ParticleView: NSView {
 
     private var snowing: Bool { style.effect == .snow || style.effect == .heavySnow }
 
-    init(frame: NSRect, style: WeatherOverlay.Style, onSnowman: @escaping (DecorationLayout) -> Void) {
+    init(frame: NSRect, style: WeatherOverlay.Style, onSnowman: @escaping (WeatherOverlay.SnowmanUpdate) -> Void) {
         self.style = style
         self.onSnowman = onSnowman
         super.init(frame: frame)
@@ -161,6 +177,7 @@ private final class ParticleView: NSView {
         timer?.invalidate()
         timer = nil
         snow.resetPointer()
+        snowman?.resetPointer()
         craft = SnowCraft()
     }
 
@@ -172,7 +189,7 @@ private final class ParticleView: NSView {
         if style.effect == .off, style.visit?.expired != false { stop() }
 
         if let window, elapsed >= nextEdgeSample,
-           (snowing && style.surfaceSnow) || [.rain, .sakura, .starfall].contains(style.effect)
+           (snowing && (style.surfaceSnow || style.props.contains(.snowman))) || [.rain, .sakura, .starfall].contains(style.effect)
                 || (style.visit != nil && style.visit?.visitor == nil) {
             edges = DesktopEdge.visible(in: window.frame)
             nextEdgeSample = elapsed + 0.12
@@ -193,13 +210,54 @@ private final class ParticleView: NSView {
                 ? snow.updateCraft(&craft, size: bounds.size,
                                    pointer: bounds.contains(cursor) ? cursor : nil, pressed: pressing, dt: dt)
                 : nil
-            snow.advance(dt: dt, size: bounds.size, count: count, heavy: heavy, deeper: style.deeperSnow,
-                         wind: CGFloat(style.wind), pointer: pressing ? nil : pointer)
+            let snowmanUpdate: WeatherOverlay.SnowmanUpdate?
             if let crafted {
-                onSnowman(DecorationLayout(x: crafted.x / bounds.width, y: crafted.y / bounds.height))
+                snowman = nil
+                appliedSnowmanLayout = nil
+                snowmanUpdate = .crafted(DecorationLayout(x: crafted.x / bounds.width, y: crafted.y / bounds.height))
+            } else {
+                snowmanUpdate = advanceSnowman(dt: dt, pointer: pressing ? nil : pointer)
             }
+            snow.advance(dt: dt, size: bounds.size, count: count, heavy: heavy, limits: style.snowDepth,
+                         wind: CGFloat(style.wind), pointer: pressing ? nil : pointer)
+            if let snowmanUpdate { onSnowman(snowmanUpdate) }
         }
         needsDisplay = true
+    }
+
+    private func advanceSnowman(dt: CGFloat, pointer: CGPoint?) -> WeatherOverlay.SnowmanUpdate? {
+        guard style.snowmanPhysics, style.props.contains(.snowman) else { return nil }
+        let saved = style.layouts[.snowman] ?? .initial(.snowman)
+        let floor = DesktopEdge(minX: 0, maxX: bounds.width, y: 0, id: -1)
+        let surfaces = edges + [floor]
+        if appliedSnowmanLayout != saved || snowman == nil {
+            let origin = CGPoint(x: bounds.width * saved.x, y: bounds.height * saved.y)
+            snowman = SnowmanPhysics(origin: origin, angle: saved.angle * .pi / 180, surfaces: surfaces)
+            appliedSnowmanLayout = saved
+            lastSnowmanMovement = elapsed
+        }
+        guard var body = snowman else { return nil }
+        let previousOrigin = body.origin
+        if let impact = body.advance(dt: dt, width: bounds.width, surfaces: surfaces, pointer: pointer) {
+            snow.scatter(impact)
+            snowman = nil
+            appliedSnowmanLayout = nil
+            return .shattered
+        }
+        snowman = body
+        if body.origin != previousOrigin || !body.isResting { lastSnowmanMovement = elapsed }
+        guard elapsed - lastSnowmanMovement >= 0.45 else { return nil }
+
+        let layout = renderedLayout(for: body)
+        guard abs(layout.x - saved.x) > 0.0005 || abs(layout.y - saved.y) > 0.0005
+            || abs(layout.angle - saved.angle) > 0.2 else { return nil }
+        appliedSnowmanLayout = layout
+        return .rested(layout)
+    }
+
+    private func renderedLayout(for body: SnowmanPhysics) -> DecorationLayout {
+        DecorationLayout(x: body.origin.x / bounds.width, y: body.origin.y / bounds.height,
+                         angle: body.angle * 180 / .pi)
     }
 
     private func particleBudget(base: Int) -> Int {
@@ -218,7 +276,12 @@ private final class ParticleView: NSView {
             }
         }
         if !style.props.isEmpty {
-            DesktopDecoration.draw(style.props, layouts: style.layouts, in: context, bounds: bounds,
+            var layouts = style.layouts
+            if snowing, style.snowmanPhysics, let snowman,
+               appliedSnowmanLayout == (layouts[.snowman] ?? .initial(.snowman)) {
+                layouts[.snowman] = renderedLayout(for: snowman)
+            }
+            DesktopDecoration.draw(style.props, layouts: layouts, in: context, bounds: bounds,
                                    treeFloor: treeFloor)
         }
 

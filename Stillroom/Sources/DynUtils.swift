@@ -277,10 +277,10 @@ private struct Studio: View {
                     get: { session.prefs.surfaceSnow == true },
                     set: { session.prefs.surfaceSnow = $0 }
                 ))
-                Toggle("Deeper snow", isOn: Binding(
-                    get: { session.prefs.deeperSnow == true },
-                    set: { session.prefs.deeperSnow = $0 }
-                ))
+                snowDepthSlider("Desktop snow depth limit", value: $session.prefs.groundSnowDepth)
+                    .disabled(session.prefs.groundSnow != true)
+                snowDepthSlider("Window and Dock snow depth limit", value: $session.prefs.surfaceSnowDepth)
+                    .disabled(session.prefs.surfaceSnow != true)
                 Toggle("Craft snowballs", isOn: Binding(
                     get: { session.prefs.snowCrafting == true },
                     set: { session.prefs.snowCrafting = $0 }
@@ -301,6 +301,14 @@ private struct Studio: View {
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
             .disabled(session.prefs.effect == .off)
+        }
+    }
+
+    private func snowDepthSlider(_ title: LocalizedStringKey, value: Binding<Double>) -> some View {
+        HStack {
+            Slider(value: value, in: SnowDepthLimits.range, step: 1) { Text(title) }
+                .accessibilityValue(Text("\(Int(value.wrappedValue)) pt"))
+            Text("\(Int(value.wrappedValue)) pt").monospacedDigit()
         }
     }
 

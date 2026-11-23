@@ -80,6 +80,25 @@ struct SnowBank {
         return (left * spacing, right * spacing)
     }
 
+    mutating func enforceLimit(_ maximum: CGFloat, wind: CGFloat) -> CGVector {
+        var overflow = CGVector.zero
+        for index in depths.indices where depths[index] > maximum {
+            var remaining = depths[index] - maximum
+            depths[index] = maximum
+            let direction = wind == 0 ? (index < depths.count / 2 ? -1 : 1) : (wind > 0 ? 1 : -1)
+            for offset in [direction, -direction, 2 * direction, -2 * direction] {
+                let neighbor = index + offset
+                guard depths.indices.contains(neighbor), remaining > 0 else { continue }
+                let shifted = min(remaining, max(0, maximum - depths[neighbor]))
+                depths[neighbor] += shifted
+                remaining -= shifted
+            }
+            if direction < 0 { overflow.dx += remaining * spacing }
+            else { overflow.dy += remaining * spacing }
+        }
+        return overflow
+    }
+
     mutating func sweep(from: CGPoint, to: CGPoint, capacity: CGFloat = .infinity, radius: CGFloat = 21) -> (x: CGFloat, height: CGFloat, mass: CGFloat)? {
         let dx = to.x - from.x
         let dy = to.y - from.y
@@ -177,28 +196,31 @@ struct SnowSimulation {
     mutating func updateCraft(_ craft: inout SnowCraft, size: CGSize,
                               pointer: CGPoint?, pressed: Bool, dt: CGFloat) -> CGPoint? {
         let snowman = craft.update(size: size, pointer: pointer, pressed: pressed, dt: dt, banks: &banks)
-        for hit in craft.impacts {
-            let amount = min(hit.speed >= 390 ? 18 : 8, 160 - clumps.count)
-            let bank = banks.firstIndex { $0.edge.id == hit.surface }
-            if amount == 0 {
-                if let bank { banks[bank].deposit(hit.mass, at: hit.point.x) }
-                continue
-            }
-            let scatter = min(180, hit.speed * 0.27)
-            let mass = hit.mass / CGFloat(amount)
-            for index in 0..<amount {
-                let spread = CGFloat(index) / CGFloat(max(1, amount - 1)) * 2 - 1
-                let speed = spread * scatter + hit.sideways * 0.28
-                let rise = 24 + scatter * (0.18 + CGFloat(index % 4) * 0.21)
-                emit(mass: mass, x: hit.point.x, y: hit.point.y + 1.6, speed: speed, rise: rise)
-            }
-        }
+        for hit in craft.impacts { scatter(hit) }
         return snowman
+    }
+
+    mutating func scatter(_ hit: SnowCraft.Impact) {
+        let amount = min(hit.speed >= 390 ? 18 : 8, 160 - clumps.count)
+        guard amount > 0 else {
+            if let bank = banks.firstIndex(where: { $0.edge.id == hit.surface }) {
+                banks[bank].deposit(hit.mass, at: hit.point.x)
+            }
+            return
+        }
+        let scatter = min(180, hit.speed * 0.27)
+        let mass = hit.mass / CGFloat(amount)
+        for index in 0..<amount {
+            let spread = CGFloat(index) / CGFloat(max(1, amount - 1)) * 2 - 1
+            let speed = spread * scatter + hit.sideways * 0.28
+            let rise = 24 + scatter * (0.18 + CGFloat(index % 4) * 0.21)
+            emit(mass: mass, x: hit.point.x, y: hit.point.y + 1.6, speed: speed, rise: rise)
+        }
     }
 
     mutating func resetPointer() { previousPointer = nil }
 
-    mutating func advance(dt: CGFloat, size: CGSize, count: Int, heavy: Bool, deeper: Bool,
+    mutating func advance(dt: CGFloat, size: CGSize, count: Int, heavy: Bool, limits: SnowDepthLimits,
                           wind: CGFloat, pointer: CGPoint?) {
         guard size.width > 0, size.height > 0 else { return }
         time += dt
@@ -220,7 +242,7 @@ struct SnowSimulation {
 
         for index in banks.indices {
             let edge = banks[index].edge
-            let cap: CGFloat = edge.id == -1 ? (deeper ? 30 : 17) : (deeper ? 22 : 12)
+            let cap = CGFloat(edge.id == -1 ? limits.ground : limits.surfaces)
             let outflow = banks[index].settle(dt: dt, wind: wind, maximum: cap)
             if edge.id == -1 { continue }
             var pending = spill[edge.id] ?? .zero
@@ -269,6 +291,16 @@ struct SnowSimulation {
             } else {
                 clump.position = next
                 clumps[index] = clump
+            }
+        }
+
+        for index in banks.indices {
+            let id = banks[index].edge.id
+            let cap = CGFloat(id == -1 ? limits.ground : limits.surfaces)
+            let excess = banks[index].enforceLimit(cap, wind: wind)
+            if id != -1, excess != .zero {
+                spill[id, default: .zero].dx += excess.dx
+                spill[id, default: .zero].dy += excess.dy
             }
         }
     }

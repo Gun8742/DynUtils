@@ -47,7 +47,8 @@
 "Starfall" = "ดาวตก";
 "Accumulate snow at the bottom" = "สะสมหิมะที่ขอบล่าง";
 "Accumulate snow on windows and Dock" = "สะสมหิมะบนหน้าต่างและ Dock";
-"Deeper snow" = "เพิ่มความหนาของหิมะ";
+"Desktop snow depth limit" = "ความหนาสูงสุดของหิมะบนเดสก์ท็อป";
+"Window and Dock snow depth limit" = "ความหนาสูงสุดของหิมะบนหน้าต่างและ Dock";
 "Rainbow" = "สายรุ้ง";
 "Lightning" = "ฟ้าแลบ";
 "Pause weather" = "พักเอฟเฟกต์";

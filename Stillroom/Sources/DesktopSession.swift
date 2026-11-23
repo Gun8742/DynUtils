@@ -249,13 +249,15 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         var props = saved[display] ?? []
         guard props.contains(prop) != enabled else { return }
         rememberDecorations(on: display)
+        var updated = prefs
         if enabled { props.insert(prop) }
         else {
             props.remove(prop)
-            prefs.decorationLayouts?[display]?[prop] = nil
+            updated.decorationLayouts?[display]?[prop] = nil
         }
         saved[display] = props.isEmpty ? nil : props
-        prefs.desktopProps = saved
+        updated.desktopProps = saved
+        prefs = updated
     }
 
     func undoDecoration() {
@@ -287,8 +289,19 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         prefs.decorationLayouts = layouts
     }
 
-    private func placeCraftedSnowman(_ layout: DecorationLayout, on display: String) {
-        rememberDecorations(on: display)
+    private func updateSnowman(_ update: WeatherOverlay.SnowmanUpdate, on display: String) {
+        let layout: DecorationLayout
+        switch update {
+        case .crafted(let crafted):
+            rememberDecorations(on: display)
+            layout = crafted
+        case .rested(let rest):
+            guard decoration(.snowman, on: display) else { return }
+            layout = rest
+        case .shattered:
+            setDecoration(.snowman, on: display, enabled: false)
+            return
+        }
         var updated = prefs
         var placements = updated.desktopProps ?? [:]
         var layouts = updated.decorationLayouts ?? [:]
@@ -488,7 +501,9 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
                 effect: weatherIDs.contains(id) ? effect : .off, density: prefs.density, wind: prefs.wind,
                 reduceMotion: reduced, lowPower: lowPower, rainbow: prefs.rainbow,
                 lightning: prefs.lightning, groundSnow: prefs.groundSnow == true,
-                surfaceSnow: prefs.surfaceSnow == true, deeperSnow: prefs.deeperSnow == true,
+                surfaceSnow: prefs.surfaceSnow == true,
+                snowDepth: SnowDepthLimits(ground: prefs.groundSnowDepth, surfaces: prefs.surfaceSnowDepth),
+                snowmanPhysics: guideEffect == nil,
                 snowCrafting: guideEffect == nil && prefs.snowCrafting == true
                     && (prefs.groundSnow == true || prefs.surfaceSnow == true),
                 props: placements[id] ?? [], layouts: prefs.decorationLayouts?[id] ?? [:],
@@ -496,8 +511,8 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
             )
             if let overlay = overlays[id] { overlay.update(screen: screen, style: style) }
             else {
-                overlays[id] = WeatherOverlay(screen: screen, style: style) { [weak self] layout in
-                    self?.placeCraftedSnowman(layout, on: id)
+                overlays[id] = WeatherOverlay(screen: screen, style: style) { [weak self] update in
+                    self?.updateSnowman(update, on: id)
                 }
             }
         }

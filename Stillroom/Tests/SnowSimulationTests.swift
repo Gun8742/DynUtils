@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 @main
 struct SnowSimulationTests {
@@ -15,7 +16,11 @@ struct SnowSimulationTests {
         treeTrunkStaysOnFloor()
         cursorRollsSnowballAndPicksUpMoreSnow()
         rollingOffLedgeRespondsToImpactSpeed()
-        print("Passed 10 snow, crafting, and decoration regression checks")
+        depthLimitsAreIndependentAndCanBeLowered()
+        legacyDeepSnowMigratesToDepthControls()
+        snowmanFollowsItsWindowAndLandsOnLowerLedge()
+        snowmanCanToppleOrShatter()
+        print("Passed 14 snow, crafting, and decoration regression checks")
     }
 
     private static func localizedImpactAndMovingLedge() {
@@ -217,8 +222,76 @@ struct SnowSimulationTests {
         }
     }
 
+    private static func depthLimitsAreIndependentAndCanBeLowered() {
+        var snow = SnowSimulation()
+        let ledge = DesktopEdge(minX: 60, maxX: 180, y: 65, id: 1)
+        snow.sync(width: size.width, ground: true, ledges: [ledge])
+        for x: CGFloat in [15, 90] {
+            precondition(snow.deposit(from: CGPoint(x: x, y: 100), to: CGPoint(x: x, y: -1), mass: 900))
+        }
+        let limits = SnowDepthLimits(ground: 9, surfaces: 4)
+        snow.advance(dt: 1.0 / 30, size: size, count: 0, heavy: false, limits: limits, wind: 1, pointer: nil)
+        precondition(snow.banks[0].depths.max() == 4)
+        precondition(snow.banks[1].depths.max() == 9)
+        let lowered = SnowDepthLimits(ground: 3, surfaces: 4)
+        snow.advance(dt: 1.0 / 30, size: size, count: 0, heavy: false, limits: lowered, wind: 1, pointer: nil)
+        precondition(snow.banks[1].depths.max() == 3)
+        precondition(snow.banks[0].depths.max() == 4)
+        precondition(!snow.clumps.isEmpty)
+    }
+
+    private static func legacyDeepSnowMigratesToDepthControls() {
+        let initial = Preferences()
+        precondition(initial.groundSnowDepth == 17 && initial.surfaceSnowDepth == 12)
+        let data = try! JSONEncoder().encode(initial)
+        var old = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+        old["deeperSnow"] = true
+        var migrated = try! JSONDecoder().decode(Preferences.self, from: JSONSerialization.data(withJSONObject: old))
+        precondition(migrated.groundSnowDepth == 30 && migrated.surfaceSnowDepth == 22)
+        migrated.groundSnowDepth = 40
+        migrated.surfaceSnowDepth = 100
+        let saved = try! JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(migrated))
+        precondition(saved.groundSnowDepth == 40 && saved.surfaceSnowDepth == 64)
+    }
+
+    private static func snowmanFollowsItsWindowAndLandsOnLowerLedge() {
+        let upper = DesktopEdge(minX: 25, maxX: 180, y: 80, id: 1)
+        let moved = DesktopEdge(minX: 45, maxX: 200, y: 85, id: 1)
+        let lower = DesktopEdge(minX: 30, maxX: 220, y: 66, id: 2)
+        var body = SnowmanPhysics(origin: CGPoint(x: 100, y: 80), angle: 0, surfaces: [upper, lower])
+        precondition(body.advance(dt: 1.0 / 30, width: size.width, surfaces: [moved, lower], pointer: nil) == nil)
+        precondition(abs(body.origin.x - 120) < 0.01 && body.origin.y == 85)
+        let firstFall = body.advance(dt: 1.0 / 30, width: size.width, surfaces: [lower], pointer: nil)
+        precondition(firstFall == nil && (66..<85).contains(body.origin.y))
+        for _ in 0..<30 {
+            precondition(body.advance(dt: 1.0 / 30, width: size.width, surfaces: [lower], pointer: nil) == nil)
+        }
+        precondition(body.origin.y == 66 && body.isResting)
+    }
+
+    private static func snowmanCanToppleOrShatter() {
+        let floor = DesktopEdge(minX: 0, maxX: size.width, y: 0, id: -1)
+        var body = SnowmanPhysics(origin: CGPoint(x: 115, y: 0), angle: 0, surfaces: [floor])
+        _ = body.advance(dt: 1.0 / 30, width: size.width, surfaces: [floor], pointer: CGPoint(x: 55, y: 69))
+        _ = body.advance(dt: 1.0 / 30, width: size.width, surfaces: [floor], pointer: CGPoint(x: 145, y: 69))
+        precondition(body.angle < 0 && body.origin.x > 115)
+        var toppled: SnowCraft.Impact?
+        for _ in 0..<20 where toppled == nil {
+            toppled = body.advance(dt: 1.0 / 30, width: size.width, surfaces: [floor], pointer: nil)
+        }
+        precondition(toppled?.surface == floor.id && toppled!.point.x > 115)
+
+        let ledge = DesktopEdge(minX: 50, maxX: 180, y: 150, id: 1)
+        var falling = SnowmanPhysics(origin: CGPoint(x: 115, y: 150), angle: 0, surfaces: [floor, ledge])
+        var landed: SnowCraft.Impact?
+        for _ in 0..<50 where landed == nil {
+            landed = falling.advance(dt: 1.0 / 30, width: size.width, surfaces: [floor], pointer: nil)
+        }
+        precondition(landed?.surface == floor.id && landed?.point.y == 0)
+    }
+
     private static func step(_ snow: inout SnowSimulation, wind: CGFloat = 0, pointer: CGPoint? = nil) {
-        snow.advance(dt: 1.0 / 30, size: size, count: 0, heavy: false, deeper: false,
+        snow.advance(dt: 1.0 / 30, size: size, count: 0, heavy: false, limits: .standard,
                      wind: wind, pointer: pointer)
     }
 }
