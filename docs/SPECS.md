@@ -21,7 +21,7 @@
 | Catalog, preview, ภาพปกติ/Ultrawide, ดาวน์โหลด | FE-02 | BE-01 |
 | ใช้ภาพจริง แยกจอ และจำค่า | FE-03 | — |
 | Day/night, season, random, local weather, match effect | FE-04 | BE-02 สำหรับสภาพอากาศภายนอก |
-| Snow, rain, lightning, rainbow, leaves, sakura, fireflies, starfall, wind | FE-05 | — |
+| Snow, drizzle, rain, mist, lightning, rainbow, leaves, sakura, fireflies, starfall, wind, density | FE-05 | — |
 | Behind windows, pause, frame rate, full screen, multi-display | FE-06 | — |
 | Snow accumulation, snowballs, interactive surfaces | FE-07 | — |
 | Snowmen, trees, decorations, Santa, Yeti, elves, train, plough | FE-08 | — |

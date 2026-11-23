@@ -28,9 +28,11 @@
 - ผ่านเมื่อจำลองข้ามเที่ยงคืน เปลี่ยนเขตเวลา ปฏิเสธสิทธิ์ location และสลับโหมดระหว่างโหลดภาพได้ โดยงานเก่าไม่ทับการเลือกใหม่
 
 ## FE-05 · Effects, particles และ wind · P0/P1 · R1/R5
-- P0 ใช้ effect เดียวเป็นตัวพิสูจน์ desktop layer P1 มี preset Off, Snow, Heavy Snow, Rain, Leaves, Sakura, Fireflies และ Starfall แยก effect ออกจาก wallpaper
+- P0 ใช้ effect เดียวเป็นตัวพิสูจน์ desktop layer P1 มี preset Off, Snow, Heavy Snow, Drizzle, Rain, Mist, Leaves, Sakura, Fireflies และ Starfall แยก effect ออกจาก wallpaper
 - ใช้ demo เป็นเกณฑ์ P2 ของพื้นผิว: Snow เลื่อนเมื่อหน้าต่างเคลื่อน, Rain กระเซ็น, Sakura เกาะชั่วคราว, Leaves กระจายเมื่อ pointer ผ่าน, Fireflies เข้าหา pointer ที่นิ่ง, Starfall แตกเป็นประกาย ระยะแรกทดสอบแยกจาก effect พื้นฐาน
 - Snow เปลี่ยนความหนาแน่นและการตกตาม preset; Rain เปิดปิด lightning/rainbow แยกกันและใช้ค่าเริ่มต้นที่ไม่มี flash; Leaves/Sakura ใช้ drift; Fireflies ใช้ glow/การเคลื่อนไหวช้า; Starfall ใช้ trail ช่วงสั้น
+- Density เลือก Light / Balanced / Full ใช้กับทุกเอฟเฟกต์และจำค่าหลังเปิดใหม่ ค่าเริ่มต้น Balanced เพิ่มความชัดของอนุภาคตามพื้นที่จอ มีเพดานต่อจอและลดปริมาณต่อเมื่อเปิด Reduced Motion หรือประหยัดพลังงาน
+- Drizzle ใช้หยดฝนสั้นและเบากว่า Rain ส่วน Mist เป็นชั้นหมอกที่ค่อย ๆ เคลื่อนบริเวณขอบล่าง ไม่รับคลิก
 - Wind เป็นค่ากลางสำหรับ effect ที่รองรับ มีทิศและความแรง Animation ใช้ delta time จำกัดจำนวน particles และหยุดสร้าง frame เมื่อถูก pause เปิด Reduced Motion ให้ลดการเคลื่อนไหวและงด flash
 - ผ่านเมื่อเปลี่ยน effect ซ้ำแล้วไม่มี layer ค้าง ปรับ wind โดยภาพเดสก์ท็อปไม่เปลี่ยน และตั้ง Off แล้ว renderer ไม่ส่ง frame ต่อ
 
