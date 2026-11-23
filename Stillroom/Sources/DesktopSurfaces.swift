@@ -85,7 +85,7 @@ struct DesktopWindowSnapshot {
         var ranges: [Int: [ClosedRange<CGFloat>]] = [:]
         for edge in edges {
             let spans = (foreground[edge.id] ?? []).compactMap { window -> ClosedRange<CGFloat>? in
-                guard window.minY <= edge.y, window.maxY > edge.y else { return nil }
+                guard window.minY <= edge.y, window.maxY >= edge.y else { return nil }
                 let left = max(edge.minX, window.minX)
                 let right = min(edge.maxX, window.maxX)
                 return left <= right ? left...right : nil

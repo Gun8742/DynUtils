@@ -29,7 +29,10 @@ struct SnowSimulationTests {
         fasterWindowMovementShedsMoreSnow()
         centerSnowLagsThenMovesForwardWhenWindowBrakes()
         suddenDownwardMotionLiftsSnow()
-        print("Passed 23 snow, crafting, and decoration regression checks")
+        rainMeltsExistingSnowWithoutClearingIt()
+        foliageStaysOnItsSurfaceAndCanBeSwept()
+        rainSplashesAndRunsOffToLowerSurfaces()
+        print("Passed 26 weather, snow, crafting, and decoration regression checks")
     }
 
     private static func localizedImpactAndMovingLedge() {
@@ -494,6 +497,88 @@ struct SnowSimulationTests {
         step(&snow)
         precondition(snow.clumps.contains { $0.position.y > low.y && $0.mass > 0 })
         precondition(snow.banks[1].depths.allSatisfy { $0 == 0 })
+    }
+
+    private static func rainMeltsExistingSnowWithoutClearingIt() {
+        var snow = SnowSimulation()
+        snow.sync(width: size.width, ground: true, ledges: [])
+        for x: CGFloat in [55, 92] {
+            precondition(snow.deposit(from: CGPoint(x: x, y: 50), to: CGPoint(x: x, y: -1), mass: 60))
+        }
+        var materials = WeatherMaterials()
+        materials.setSurfaces([], width: size.width, covered: [:])
+        let original = snow.depth(at: 55, on: -1)
+        let baseline = snow
+        materials.select(.rain)
+        precondition(snow.depth(at: 55, on: -1) == original)
+        materials.advance(dt: 1.0 / 30, size: size, count: 0, wind: 0, pointer: nil, snow: &snow)
+        precondition(snow.depth(at: 55, on: -1) < original && snow.depth(at: 55, on: -1) > 0)
+        var drop = material(.rain, at: CGPoint(x: 55, y: 0))
+        precondition(materials.hit(&drop, from: CGPoint(x: 55, y: 35), snow: &snow))
+        precondition(snow.depth(at: 55, on: -1) < snow.depth(at: 92, on: -1))
+        for _ in 0..<260 {
+            materials.advance(dt: 1.0 / 30, size: size, count: 0, wind: 0, pointer: nil, snow: &snow)
+        }
+        precondition(!snow.hasDeposits)
+
+        var drizzleSnow = baseline
+        materials.select(.drizzle)
+        for _ in 0..<260 {
+            materials.advance(dt: 1.0 / 30, size: size, count: 0, wind: 0, pointer: nil, snow: &drizzleSnow)
+        }
+        precondition(drizzleSnow.hasDeposits)
+    }
+
+    private static func foliageStaysOnItsSurfaceAndCanBeSwept() {
+        var snow = SnowSimulation()
+        let edge = DesktopEdge(minX: 25, maxX: 135, y: 72, id: 1)
+        var materials = WeatherMaterials()
+        materials.setSurfaces([edge], width: size.width, covered: [:])
+        materials.select(.leaves)
+        for kind in [WeatherMaterials.Kind.leaf, .petal] {
+            var leaf = material(kind, at: CGPoint(x: 91, y: 55))
+            precondition(materials.hit(&leaf, from: CGPoint(x: 90, y: 85), snow: &snow))
+        }
+        precondition(materials.litter.count == 2 && materials.litter[1].layer > 0)
+        materials.select(.rain)
+        let moved = DesktopEdge(minX: 46, maxX: 156, y: 85, id: 1)
+        materials.setSurfaces([moved], width: size.width, covered: [:])
+        let originalX = materials.litter[0].x
+        materials.advance(dt: 0.03, size: size, count: 0, wind: 0, pointer: nil, snow: &snow)
+        precondition(abs(materials.litter[0].x - originalX - 21) < 0.01 && materials.litter[0].wetness > 0)
+        materials.select(.snow)
+        for x: CGFloat in [65, 174] {
+            materials.advance(dt: 0.03, size: size, count: 0, wind: 0,
+                              pointer: CGPoint(x: x, y: 85), snow: &snow)
+        }
+        precondition(materials.litter.isEmpty && materials.loose.count == 2)
+    }
+
+    private static func rainSplashesAndRunsOffToLowerSurfaces() {
+        var snow = SnowSimulation()
+        let edge = DesktopEdge(minX: 26, maxX: 132, y: 72, id: 1)
+        var materials = WeatherMaterials()
+        materials.setSurfaces([edge], width: size.width, covered: [:])
+        var drop = material(.rain, at: CGPoint(x: 128, y: 59))
+        precondition(materials.hit(&drop, from: CGPoint(x: 128, y: 100), snow: &snow))
+        precondition(materials.splashes.count == 2 && materials.puddles.first?.edgeID == 1)
+        var ranOff = false
+        var reachedFloor = false
+        for _ in 0..<60 {
+            materials.advance(dt: 1.0 / 30, size: size, count: 0, wind: 0.5, pointer: nil, snow: &snow)
+            ranOff = ranOff || materials.loose.contains(where: { $0.kind == .drizzle && $0.point.x > edge.maxX })
+            reachedFloor = reachedFloor || materials.puddles.contains(where: { $0.edgeID == -1 && $0.water > 0.19 })
+        }
+        precondition(ranOff && reachedFloor)
+        for _ in 0..<100 {
+            materials.advance(dt: 1.0 / 30, size: size, count: 0, wind: 0, pointer: nil, snow: &snow)
+        }
+        precondition(materials.puddles.isEmpty)
+    }
+
+    private static func material(_ kind: WeatherMaterials.Kind, at point: CGPoint) -> WeatherMaterials.Particle {
+        WeatherMaterials.Particle(kind: kind, point: point, velocity: CGVector(dx: 0, dy: -250),
+                                  radius: 2, phase: 0, angle: 0)
     }
 
     private static func step(_ snow: inout SnowSimulation, wind: CGFloat = 0, pointer: CGPoint? = nil) {
