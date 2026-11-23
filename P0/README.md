@@ -26,15 +26,7 @@ Verified on macOS 26.7.3, Apple silicon:
 - Closing the control window while snow is running exits the process. The first
   test caught the overlay keeping the app alive; the fix was retested.
 
-Remaining before closing P0:
-
-- Apply and restore a test wallpaper in a desktop session where changing the
-  current wallpaper is authorized. Confirm the image visually and verify the
-  previous wallpaper returns. The live smoke check left the wallpaper in place.
-- With snow on, confirm flakes are visible, desktop clicks reach items beneath
-  them, windows stay above them, a different Space behaves correctly, and a
-  fullscreen app covers them. The smoke check confirmed the renderer's running
-  state, not visual compositor ordering.
-- Lock/unlock and sleep/wake. Verify rendering stops during lock/sleep and comes
-  back only if Snow was enabled. The prototype uses the public workspace
-  notifications plus a macOS lock notification whose delivery needs testing.
+Manual P0 acceptance was reported as passing by the project owner on
+23 November 2026: apply/restore wallpaper, visible and click-through snow
+across Spaces and fullscreen, and lock/unlock plus sleep/wake. The automated
+smoke check above covered startup, toggle state, and teardown.
