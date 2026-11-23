@@ -78,6 +78,7 @@ struct Preferences: Codable {
     var groundSnow: Bool?
     var surfaceSnow: Bool?
     var deeperSnow: Bool?
+    var snowCrafting: Bool?
     var southernHemisphere: Bool?
     var randomHours: Int?
     var lastRandomSlot: Int?

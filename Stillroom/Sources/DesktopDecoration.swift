@@ -21,6 +21,16 @@ enum DesktopDecoration {
         }
     }
 
+    static func drawSnowball(in context: CGContext, rect: CGRect) {
+        shade(CGPath(ellipseIn: rect, transform: nil), in: context) {
+            context.drawRadialGradient(snow,
+                                       startCenter: CGPoint(x: rect.midX - rect.width * 0.15,
+                                                            y: rect.midY + rect.height * 0.19),
+                                       startRadius: 1, endCenter: CGPoint(x: rect.midX, y: rect.midY),
+                                       endRadius: rect.width * 0.68, options: .drawsAfterEndLocation)
+        }
+    }
+
     private static func drawSnowman(in context: CGContext) {
         ellipse(in: context, x: 3, y: 1, rx: 29, ry: 5, color: 0x21394c, alpha: 0.23)
         for elbow in [-1.0, 1.0] {
@@ -36,11 +46,7 @@ enum DesktopDecoration {
         for ball: CGRect in [CGRect(x: -25, y: 2, width: 50, height: 40),
                              CGRect(x: -19, y: 29, width: 39, height: 38),
                              CGRect(x: -15, y: 57, width: 33, height: 33)] {
-            shade(CGPath(ellipseIn: ball, transform: nil), in: context) {
-                context.drawRadialGradient(snow, startCenter: CGPoint(x: ball.midX - 7, y: ball.midY + 8),
-                                           startRadius: 1, endCenter: CGPoint(x: ball.midX, y: ball.midY),
-                                           endRadius: ball.width * 0.68, options: .drawsAfterEndLocation)
-            }
+            drawSnowball(in: context, rect: ball)
         }
 
         let tail = CGMutablePath()

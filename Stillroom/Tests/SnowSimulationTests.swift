@@ -9,7 +9,10 @@ struct SnowSimulationTests {
         sidewaysFlowFollowsWind()
         cursorSweepsOnlyWhileMoving()
         overflowReachesLowerLedge()
-        print("Passed 4 snow physics regression checks")
+        draggingUsesBankSnowAndStacksThreeBalls()
+        pickingUpMovesAnExistingBall()
+        enteringAnotherDisplayDoesNotStartDrag()
+        print("Passed 7 snow physics and crafting regression checks")
     }
 
     private static func localizedImpactAndMovingLedge() {
@@ -66,6 +69,72 @@ struct SnowSimulationTests {
         }
         precondition(emitted && snow.banks[0].depths.reduce(0, +) > 0)
         precondition(snow.banks[2].depths.allSatisfy { $0 == 0 })
+    }
+
+    private static func draggingUsesBankSnowAndStacksThreeBalls() {
+        var craft = SnowCraft()
+        var banks = [makeCraftBank()]
+        let originalMass = banks[0].depths.reduce(0, +)
+        let start = CGPoint(x: 26, y: 9)
+        _ = craft.update(size: size, pointer: start, pressed: false, banks: &banks)
+        _ = craft.update(size: size, pointer: start, pressed: true, banks: &banks)
+        _ = craft.update(size: size, pointer: start, pressed: false, banks: &banks)
+        precondition(craft.visibleBalls.isEmpty && banks[0].depths.reduce(0, +) == originalMass)
+
+        for count in 1...3 {
+            let drop = CGPoint(x: 178, y: CGFloat(16 + (count - 1) * 15))
+            let snowman = roll(&craft, bank: &banks, to: drop)
+            if count < 3 {
+                precondition(snowman == nil && craft.visibleBalls.count == count)
+                precondition(craft.visibleBalls.last!.center.x == drop.x)
+            } else {
+                precondition(snowman == CGPoint(x: 178, y: 0) && craft.visibleBalls.isEmpty)
+            }
+        }
+        precondition(banks[0].depths.reduce(0, +) < originalMass)
+    }
+
+    private static func pickingUpMovesAnExistingBall() {
+        var craft = SnowCraft()
+        var banks = [makeCraftBank()]
+        _ = roll(&craft, bank: &banks, to: CGPoint(x: 172, y: 13))
+        let center = craft.visibleBalls[0].center
+        let newPosition = CGPoint(x: 208, y: 18)
+        let bankBefore = banks[0].depths
+        _ = craft.update(size: size, pointer: center, pressed: true, banks: &banks)
+        _ = craft.update(size: size, pointer: newPosition, pressed: true, banks: &banks)
+        _ = craft.update(size: size, pointer: newPosition, pressed: false, banks: &banks)
+        precondition(craft.visibleBalls.count == 1 && craft.visibleBalls[0].center.x == newPosition.x)
+        precondition(banks[0].depths == bankBefore)
+    }
+
+    private static func enteringAnotherDisplayDoesNotStartDrag() {
+        var craft = SnowCraft()
+        var banks = [makeCraftBank()]
+        let original = banks[0].depths
+        _ = craft.update(size: size, pointer: nil, pressed: false, banks: &banks)
+        _ = craft.update(size: size, pointer: nil, pressed: true, banks: &banks)
+        _ = craft.update(size: size, pointer: CGPoint(x: 20, y: 9), pressed: true, banks: &banks)
+        _ = craft.update(size: size, pointer: CGPoint(x: 112, y: 9), pressed: true, banks: &banks)
+        _ = craft.update(size: size, pointer: CGPoint(x: 130, y: 9), pressed: false, banks: &banks)
+        precondition(craft.visibleBalls.isEmpty && banks[0].depths == original)
+    }
+
+    private static func makeCraftBank() -> SnowBank {
+        var bank = SnowBank(edge: DesktopEdge(minX: 0, maxX: size.width, y: 0, id: -1))
+        for index in bank.depths.indices where bank.center(of: index) < 120 {
+            bank.deposit(bank.spacing * 11, at: bank.center(of: index))
+        }
+        return bank
+    }
+
+    private static func roll(_ craft: inout SnowCraft, bank: inout [SnowBank], to drop: CGPoint) -> CGPoint? {
+        let start = CGPoint(x: 26, y: 9)
+        _ = craft.update(size: size, pointer: start, pressed: false, banks: &bank)
+        _ = craft.update(size: size, pointer: start, pressed: true, banks: &bank)
+        _ = craft.update(size: size, pointer: CGPoint(x: 108, y: 9), pressed: true, banks: &bank)
+        _ = craft.update(size: size, pointer: drop, pressed: true, banks: &bank)
+        return craft.update(size: size, pointer: drop, pressed: false, banks: &bank)
     }
 
     private static func step(_ snow: inout SnowSimulation, wind: CGFloat = 0, pointer: CGPoint? = nil) {

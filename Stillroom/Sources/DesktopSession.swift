@@ -287,6 +287,18 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         prefs.decorationLayouts = layouts
     }
 
+    private func placeCraftedSnowman(_ layout: DecorationLayout, on display: String) {
+        rememberDecorations(on: display)
+        var updated = prefs
+        var placements = updated.desktopProps ?? [:]
+        var layouts = updated.decorationLayouts ?? [:]
+        placements[display, default: []].insert(.snowman)
+        layouts[display, default: [:]][.snowman] = layout
+        updated.desktopProps = placements
+        updated.decorationLayouts = layouts
+        prefs = updated
+    }
+
     func setAutomaticVisitor(_ visitor: DesktopVisitor, enabled: Bool) {
         var selected = prefs.automaticVisitors ?? []
         if enabled { selected.insert(visitor) } else { selected.remove(visitor) }
@@ -477,11 +489,17 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
                 reduceMotion: reduced, lowPower: lowPower, rainbow: prefs.rainbow,
                 lightning: prefs.lightning, groundSnow: prefs.groundSnow == true,
                 surfaceSnow: prefs.surfaceSnow == true, deeperSnow: prefs.deeperSnow == true,
+                snowCrafting: guideEffect == nil && prefs.snowCrafting == true
+                    && (prefs.groundSnow == true || prefs.surfaceSnow == true),
                 props: placements[id] ?? [], layouts: prefs.decorationLayouts?[id] ?? [:],
                 visit: desktopVisits[id], aboveWindows: prefs.effectsAboveWindows == true
             )
             if let overlay = overlays[id] { overlay.update(screen: screen, style: style) }
-            else { overlays[id] = WeatherOverlay(screen: screen, style: style) }
+            else {
+                overlays[id] = WeatherOverlay(screen: screen, style: style) { [weak self] layout in
+                    self?.placeCraftedSnowman(layout, on: id)
+                }
+            }
         }
         if effect == .off { weatherStatus = "Off" }
         else if !causes.isEmpty { weatherStatus = "Paused: " + causes.joined(separator: ", ") }

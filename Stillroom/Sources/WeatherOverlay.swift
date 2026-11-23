@@ -14,6 +14,7 @@ final class WeatherOverlay: NSObject {
         var groundSnow: Bool
         var surfaceSnow: Bool
         var deeperSnow: Bool
+        var snowCrafting: Bool
         var props: Set<DesktopProp>
         var layouts: [DesktopProp: DecorationLayout]
         var visit: DesktopVisit?
@@ -23,10 +24,11 @@ final class WeatherOverlay: NSObject {
     private let window: NSWindow
     private let renderer: ParticleView
 
-    init(screen: NSScreen, style: Style) {
+    init(screen: NSScreen, style: Style, onSnowman: @escaping (DecorationLayout) -> Void) {
         window = NSWindow(contentRect: screen.frame, styleMask: .borderless,
                           backing: .buffered, defer: false, screen: screen)
-        renderer = ParticleView(frame: NSRect(origin: .zero, size: screen.frame.size), style: style)
+        renderer = ParticleView(frame: NSRect(origin: .zero, size: screen.frame.size), style: style,
+                                onSnowman: onSnowman)
         super.init()
         window.setFrame(screen.frame, display: false)
         window.isReleasedWhenClosed = false
@@ -109,6 +111,8 @@ private final class ParticleView: NSView {
     private var nextEdgeSample: CGFloat = 0
     private var edges: [DesktopEdge] = []
     private var snow = SnowSimulation()
+    private var craft = SnowCraft()
+    private let onSnowman: (DecorationLayout) -> Void
     private var pointer = CGPoint(x: -.infinity, y: -.infinity)
     private var pointerStillSince: CGFloat = 0
     var style: WeatherOverlay.Style {
@@ -119,7 +123,9 @@ private final class ParticleView: NSView {
                 nextEdgeSample = 0
                 edges = []
                 snow = SnowSimulation()
+                craft = SnowCraft()
             }
+            if oldValue.snowCrafting != style.snowCrafting { craft = SnowCraft() }
             if oldValue.surfaceSnow != style.surfaceSnow { nextEdgeSample = 0 }
             needsDisplay = true
         }
@@ -127,8 +133,9 @@ private final class ParticleView: NSView {
 
     private var snowing: Bool { style.effect == .snow || style.effect == .heavySnow }
 
-    init(frame: NSRect, style: WeatherOverlay.Style) {
+    init(frame: NSRect, style: WeatherOverlay.Style, onSnowman: @escaping (DecorationLayout) -> Void) {
         self.style = style
+        self.onSnowman = onSnowman
         super.init(frame: frame)
     }
 
@@ -148,6 +155,7 @@ private final class ParticleView: NSView {
         timer?.invalidate()
         timer = nil
         snow.resetPointer()
+        craft = SnowCraft()
     }
 
     @objc private func redraw() {
@@ -174,8 +182,16 @@ private final class ParticleView: NSView {
 
             let ledges = style.surfaceSnow ? edges : []
             snow.sync(width: bounds.width, ground: style.groundSnow, ledges: ledges)
+            let pressing = style.snowCrafting && NSEvent.pressedMouseButtons & 1 != 0
+            let crafted = style.snowCrafting
+                ? snow.updateCraft(&craft, size: bounds.size,
+                                   pointer: bounds.contains(cursor) ? cursor : nil, pressed: pressing)
+                : nil
             snow.advance(dt: dt, size: bounds.size, count: count, heavy: heavy, deeper: style.deeperSnow,
-                         wind: CGFloat(style.wind), pointer: pointer)
+                         wind: CGFloat(style.wind), pointer: pressing ? nil : pointer)
+            if let crafted {
+                onSnowman(DecorationLayout(x: crafted.x / bounds.width, y: crafted.y / bounds.height))
+            }
         }
         needsDisplay = true
     }
@@ -189,7 +205,15 @@ private final class ParticleView: NSView {
         guard bounds.width > 0, bounds.height > 0,
               let context = NSGraphicsContext.current?.cgContext else { return }
         context.clear(dirtyRect)
-        if snowing { drawSnowBanks(in: context) }
+        if snowing {
+            drawSnowBanks(in: context)
+            for ball in craft.visibleBalls {
+                DesktopDecoration.drawSnowball(in: context, rect: CGRect(
+                    x: ball.center.x - ball.radius, y: ball.center.y - ball.radius,
+                    width: ball.radius * 2, height: ball.radius * 2
+                ))
+            }
+        }
         if !style.props.isEmpty {
             DesktopDecoration.draw(style.props, layouts: style.layouts, in: context, bounds: bounds)
         }

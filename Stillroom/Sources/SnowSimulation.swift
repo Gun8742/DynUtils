@@ -80,7 +80,7 @@ struct SnowBank {
         return (left * spacing, right * spacing)
     }
 
-    mutating func sweep(from: CGPoint, to: CGPoint) -> (x: CGFloat, height: CGFloat, mass: CGFloat)? {
+    mutating func sweep(from: CGPoint, to: CGPoint, capacity: CGFloat = .infinity) -> (x: CGFloat, height: CGFloat, mass: CGFloat)? {
         let dx = to.x - from.x
         let dy = to.y - from.y
         let distance = hypot(dx, dy)
@@ -102,9 +102,12 @@ struct SnowBank {
             let t = min(1, max(0, ((x - from.x) * dx + (y - from.y) * dy) / (distance * distance)))
             let separation = hypot(x - from.x - t * dx, y - from.y - t * dy)
             guard separation < radius else { continue }
-            let amount = depths[index] * (1 - separation / radius) * min(0.6, distance / 21)
+            let available = depths[index] * (1 - separation / radius) * min(0.6, distance / 21) * spacing
+            let taken = min(available, capacity - mass)
+            guard taken > 0 else { break }
+            let amount = taken / spacing
             depths[index] -= amount
-            mass += amount * spacing
+            mass += taken
             lastX = dx < 0 ? min(lastX, x) : max(lastX, x)
             lastHeight = max(lastHeight, y)
         }
@@ -170,6 +173,11 @@ struct SnowSimulation {
             return bank
         }
         for id in remaining.keys { spill.removeValue(forKey: id) }
+    }
+
+    mutating func updateCraft(_ craft: inout SnowCraft, size: CGSize,
+                              pointer: CGPoint?, pressed: Bool) -> CGPoint? {
+        craft.update(size: size, pointer: pointer, pressed: pressed, banks: &banks)
     }
 
     mutating func resetPointer() { previousPointer = nil }

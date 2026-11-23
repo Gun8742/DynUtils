@@ -281,6 +281,15 @@ private struct Studio: View {
                     get: { session.prefs.deeperSnow == true },
                     set: { session.prefs.deeperSnow = $0 }
                 ))
+                Toggle("Craft snowballs", isOn: Binding(
+                    get: { session.prefs.snowCrafting == true },
+                    set: { session.prefs.snowCrafting = $0 }
+                ))
+                .disabled(session.prefs.groundSnow != true && session.prefs.surfaceSnow != true)
+                if session.prefs.snowCrafting == true {
+                    Text("Drag through snow to make a ball. Stack three to build a snowman. Clicks still reach the app below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             if session.prefs.effect == .rain {
                 Toggle("Rainbow", isOn: $session.prefs.rainbow)
