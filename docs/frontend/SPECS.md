@@ -77,7 +77,7 @@
 ## FE-11 · Preferences, permissions, lifecycle, localization และ news · P1/P2 · R2/R5
 - ตั้ง startup, placement, pause, frame limit, display, locale และ motion ใน Settings เก็บแบบ versioned ในเครื่อง ขอ permission ตาม feature และอัปเดตสถานะเมื่อผู้ใช้กลับจาก System Settings
 - หากไม่ให้สิทธิ์ ให้แสดงขอบเขตที่ยังใช้ได้และทางเปิด settings; launch at login ใช้กลไกของ macOS ที่ยืนยันผ่าน P0/P1 และสะท้อนสถานะจริง
-- ใช้ key สำหรับแปล เริ่มไทย/อังกฤษและ fallback ภาษาอังกฤษ รองรับ VoiceOver, focus และ contrast. ข่าวเป็นรายการ release notes ของเรา เก็บ seen state แบบ local
+- เลือก English หรือไทยใน Settings ได้ ค่าเริ่มต้นเป็น English รวมถึงค่าตามระบบจากเวอร์ชันก่อน เก็บภาษาที่ผู้ใช้เลือกไว้และใช้ English เป็น fallback สำหรับข้อความที่ยังไม่มีคำแปล รองรับ VoiceOver, focus และ contrast. ข่าวเป็นรายการ release notes ของเรา เก็บ seen state แบบ local
 - ผ่านเมื่อ reset settings แล้วกลับค่า default, migration รองรับค่ารุ่นก่อน และสลับภาษาแล้ว label/layout ยังใช้งานได้
 
 ## FE-12 · License, devices และ updates · P3 · R3/R5
