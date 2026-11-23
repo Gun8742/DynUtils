@@ -8,12 +8,12 @@ struct DynUtils: App {
 
     var body: some Scene {
         Window("DynUtils", id: "main") {
-            Studio(session: session)
+            Studio(session: session).environment(\.locale, session.interfaceLocale)
         }
         .defaultSize(width: 900, height: 660)
 
         MenuBarExtra("DynUtils", systemImage: "cloud.snow") {
-            QuickControls(session: session)
+            QuickControls(session: session).environment(\.locale, session.interfaceLocale)
         }
     }
 }
@@ -30,19 +30,19 @@ private struct QuickControls: View {
                 session.selectEffect(session.prefs.lastEffect)
             }
         } else {
-            Button(session.prefs.manualPause ? "Resume weather" : "Pause weather") {
+            Button(LocalizedStringKey(session.prefs.manualPause ? "Resume weather" : "Pause weather")) {
                 session.prefs.manualPause.toggle()
             }
         }
         Menu("Choose effect") {
             ForEach(Effect.allCases) { effect in
-                Button(effect.title) { session.selectEffect(effect) }
+                Button(LocalizedStringKey(effect.title)) { session.selectEffect(effect) }
             }
         }
         Divider()
         Menu("Desktop visitors") {
             ForEach(DesktopVisitor.allCases) { visitor in
-                Button(visitor.title) { session.playVisitor(visitor) }
+                Button(LocalizedStringKey(visitor.title)) { session.playVisitor(visitor) }
             }
         }
         Button("Open DynUtils") {
@@ -103,7 +103,7 @@ private struct Studio: View {
                     Text("DynUtils").font(.title2.bold()).padding(.bottom, 10)
                     ForEach(Section.allCases) { item in
                         Button { section = item } label: {
-                            Label(item.rawValue.capitalized, systemImage: item.icon)
+                            Label(LocalizedStringKey(item.rawValue.capitalized), systemImage: item.icon)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(8)
                                 .background(section == item ? Color.accentColor.opacity(0.15) : .clear,
@@ -121,7 +121,7 @@ private struct Studio: View {
                 Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        Text(section.rawValue.capitalized).font(.largeTitle.bold())
+                        Text(LocalizedStringKey(section.rawValue.capitalized)).font(.largeTitle.bold())
                         switch section {
                         case .wallpapers: wallpapers
                         case .effects: effects
@@ -164,10 +164,10 @@ private struct Studio: View {
                     get: { session.prefs.resolution[scene.id] ?? .auto },
                     set: { session.prefs.resolution[scene.id] = $0 }
                 )) {
-                    ForEach(Resolution.allCases) { Text($0.title).tag($0) }
+                    ForEach(Resolution.allCases) { Text(LocalizedStringKey($0.title)).tag($0) }
                 }
                 Picker("Scene rule", selection: Binding(get: { session.prefs.rule }, set: { session.setRule($0) })) {
-                    ForEach(WallpaperRule.allCases) { Text($0.title).tag($0) }
+                    ForEach(WallpaperRule.allCases) { Text(LocalizedStringKey($0.title)).tag($0) }
                 }
             }
             if session.prefs.rule == .season {
@@ -253,10 +253,10 @@ private struct Studio: View {
             Text("Effects run independently of your wallpaper unless Match effect is enabled.")
                 .foregroundStyle(.secondary)
             Picker("Weather", selection: Binding(get: { session.prefs.effect }, set: { session.selectEffect($0) })) {
-                ForEach(Effect.allCases) { Text($0.title).tag($0) }
+                ForEach(Effect.allCases) { Text(LocalizedStringKey($0.title)).tag($0) }
             }.fixedSize()
             Picker("Density", selection: $session.prefs.density) {
-                ForEach(EffectDensity.allCases) { Text($0.title).tag($0) }
+                ForEach(EffectDensity.allCases) { Text(LocalizedStringKey($0.title)).tag($0) }
             }
             .pickerStyle(.segmented)
             .accessibilityLabel("Effect density")
@@ -287,7 +287,7 @@ private struct Studio: View {
                 Toggle("Lightning", isOn: $session.prefs.lightning)
             }
             Text(session.weatherStatus).foregroundStyle(.secondary)
-            Button(session.prefs.manualPause ? "Resume weather" : "Pause weather") {
+            Button(LocalizedStringKey(session.prefs.manualPause ? "Resume weather" : "Pause weather")) {
                 session.prefs.manualPause.toggle()
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
@@ -310,9 +310,21 @@ private struct Studio: View {
             }
             Divider()
             Text("Power & motion").font(.headline)
+            Picker("Language", selection: Binding(
+                get: { session.prefs.interfaceLanguage ?? "system" },
+                set: { session.prefs.interfaceLanguage = $0 }
+            )) {
+                Text("System language").tag("system")
+                Text("English").tag("en")
+                Text("ไทย").tag("th")
+            }.fixedSize()
+            Toggle("Show effects above windows", isOn: Binding(
+                get: { session.prefs.effectsAboveWindows == true },
+                set: { session.prefs.effectsAboveWindows = $0 }
+            ))
             Toggle("Pause on battery", isOn: $session.prefs.pauseOnBattery)
             Toggle("Reduce motion", isOn: $session.prefs.reduceMotion)
-            Text("Weather runs behind windows at up to 30 FPS.")
+            Text("Weather runs at up to 30 FPS and does not intercept clicks.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Open at login", isOn: Binding(
                 get: { session.loginStatus == .enabled || session.loginStatus == .requiresApproval },
@@ -332,7 +344,7 @@ private struct Studio: View {
                     ForEach(session.displays) { Text($0.name).tag($0.id) }
                 }.fixedSize()
                 ForEach(DesktopProp.allCases) { prop in
-                    Toggle(prop.title, isOn: Binding(
+                    Toggle(LocalizedStringKey(prop.title), isOn: Binding(
                         get: { session.decoration(prop, on: display.id) },
                         set: { session.setDecoration(prop, on: display.id, enabled: $0) }
                     ))
@@ -352,7 +364,7 @@ private struct Studio: View {
                 ))
                 ForEach(DesktopVisitor.allCases) { visitor in
                     HStack {
-                        Toggle(visitor.title, isOn: Binding(
+                        Toggle(LocalizedStringKey(visitor.title), isOn: Binding(
                             get: { session.prefs.automaticVisitors?.contains(visitor) == true },
                             set: { session.setAutomaticVisitor(visitor, enabled: $0) }
                         ))

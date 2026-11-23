@@ -91,6 +91,7 @@ struct Preferences: Codable {
     var automaticVisitors: Set<DesktopVisitor>?
     var routeVisitorsAcrossDisplays: Bool?
     var interfaceLanguage: String?
+    var effectsAboveWindows: Bool?
     var wind = 0.0
     var rainbow = false
     var lightning = false

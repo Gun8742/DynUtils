@@ -17,6 +17,7 @@ final class WeatherOverlay: NSObject {
         var props: Set<DesktopProp>
         var layouts: [DesktopProp: DecorationLayout]
         var visit: DesktopVisit?
+        var aboveWindows: Bool
     }
 
     private let window: NSWindow
@@ -34,7 +35,7 @@ final class WeatherOverlay: NSObject {
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.hidesOnDeactivate = false
-        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
+        window.level = Self.level(aboveWindows: style.aboveWindows)
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
         window.contentView = renderer
         NotificationCenter.default.addObserver(
@@ -47,8 +48,15 @@ final class WeatherOverlay: NSObject {
 
     func update(screen: NSScreen, style: Style) {
         if window.frame != screen.frame { window.setFrame(screen.frame, display: true) }
+        if style.aboveWindows != renderer.style.aboveWindows {
+            window.level = Self.level(aboveWindows: style.aboveWindows)
+        }
         renderer.style = style
         visibilityChanged()
+    }
+
+    private static func level(aboveWindows: Bool) -> NSWindow.Level {
+        aboveWindows ? .floating : NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) + 1)
     }
 
     func close() {

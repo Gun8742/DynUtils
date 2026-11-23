@@ -7,6 +7,14 @@ final class DesktopSaver {
     static let delays = [0, 1, 2, 5, 10, 15, 30]
     private var windows: [NSWindow] = []
 
+    static func idleThresholdReached(delay: Int, idleSeconds: TimeInterval,
+                                     sinceReset: TimeInterval, systemSleepMinutes: Int?) -> Bool {
+        guard delays.contains(delay), delay > 0,
+              systemSleepMinutes.map({ delay < $0 }) ?? true else { return false }
+        let threshold = Double(delay) * 60
+        return idleSeconds >= threshold && sinceReset >= threshold
+    }
+
     static var idleSeconds: TimeInterval {
         let types: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .mouseMoved, .leftMouseDown,
                                     .rightMouseDown, .otherMouseDown, .leftMouseDragged,

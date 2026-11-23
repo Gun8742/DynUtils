@@ -44,6 +44,10 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     @Published private(set) var loginError: String?
     @Published private(set) var canUndoDecoration = false
     private var decorationUndo: (display: String, props: Set<DesktopProp>, layouts: [DesktopProp: DecorationLayout])?
+    var interfaceLocale: Locale {
+        guard let language = prefs.interfaceLanguage, language != "system" else { return .autoupdatingCurrent }
+        return Locale(identifier: language)
+    }
     private var desktopVisits: [String: DesktopVisit] = [:]
     private var nextAutomaticVisit = Date().addingTimeInterval(120)
 
@@ -421,9 +425,8 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         let delay = prefs.saverDelay ?? 0
         guard DesktopSaver.delays.contains(delay), delay > 0, prefs.onboardingComplete,
               pauseReasons.isEmpty, !screenSaver.isRunning, guideEffect == nil,
-              now.timeIntervalSince(saverIdleReset) >= Double(delay) * 60,
-              DesktopSaver.idleSeconds >= Double(delay) * 60,
-              displaySleepMinutes.map({ delay < $0 }) ?? true,
+              DesktopSaver.idleThresholdReached(delay: delay, idleSeconds: DesktopSaver.idleSeconds,
+                sinceReset: now.timeIntervalSince(saverIdleReset), systemSleepMinutes: displaySleepMinutes),
               !DesktopSaver.mediaKeepsDisplayAwake else { return }
         let scene: Wallpaper
         if prefs.saverShuffle == true {
@@ -475,7 +478,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
                 lightning: prefs.lightning, groundSnow: prefs.groundSnow == true,
                 surfaceSnow: prefs.surfaceSnow == true, deeperSnow: prefs.deeperSnow == true,
                 props: placements[id] ?? [], layouts: prefs.decorationLayouts?[id] ?? [:],
-                visit: desktopVisits[id]
+                visit: desktopVisits[id], aboveWindows: prefs.effectsAboveWindows == true
             )
             if let overlay = overlays[id] { overlay.update(screen: screen, style: style) }
             else { overlays[id] = WeatherOverlay(screen: screen, style: style) }
