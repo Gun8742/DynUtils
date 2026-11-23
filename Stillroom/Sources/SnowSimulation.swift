@@ -44,6 +44,20 @@ struct SnowBank {
         depths[index] += mass / spacing
     }
 
+    mutating func melt(_ amount: CGFloat, near x: CGFloat? = nil) {
+        if let x {
+            let index = min(depths.count - 1, max(0, Int((x - edge.minX) / spacing)))
+            for column in max(0, index - 1)...min(depths.count - 1, index + 1) {
+                let loss = column == index ? amount : amount * 0.42
+                depths[column] = max(0, depths[column] - loss)
+            }
+        } else {
+            for index in depths.indices where depths[index] > 0 {
+                depths[index] = max(0, depths[index] - amount)
+            }
+        }
+    }
+
     mutating func move(to edge: DesktopEdge, sampledAt: TimeInterval? = nil, windowBottom: CGFloat? = nil) {
         if let sampledAt, edge.id != -1, !edge.isDock {
             observeMotion(to: edge, sampledAt: sampledAt, windowBottom: windowBottom)
@@ -342,6 +356,29 @@ struct SnowSimulation {
         }
     }
 
+    var hasDeposits: Bool {
+        banks.contains { $0.depths.contains(where: { $0 > 0 }) } || !detached.isEmpty
+    }
+
+    mutating func melt(_ amount: CGFloat) {
+        for index in banks.indices { banks[index].melt(amount) }
+        for id in Array(detached.keys) { detached[id]?.bank.melt(amount) }
+    }
+
+    mutating func melt(_ amount: CGFloat, at x: CGFloat, on edgeID: Int) {
+        if let index = banks.firstIndex(where: { $0.edge.id == edgeID }) {
+            banks[index].melt(amount, near: x)
+        }
+    }
+
+    func depth(at x: CGFloat, on edgeID: Int) -> CGFloat {
+        banks.first { $0.edge.id == edgeID }?.depth(at: x) ?? 0
+    }
+
+    mutating func clearAirborne() {
+        flakes.removeAll(keepingCapacity: true)
+    }
+
     mutating func updateCraft(_ craft: inout SnowCraft, size: CGSize,
                               pointer: CGPoint?, pressed: Bool, dt: CGFloat) -> SnowCraft.CompletedSnowman? {
         let snowman = craft.update(size: size, pointer: pointer, pressed: pressed, dt: dt, banks: &banks)
@@ -469,8 +506,7 @@ struct SnowSimulation {
         }
     }
 
-    @discardableResult
-    mutating func deposit(from start: CGPoint, to end: CGPoint, mass: CGFloat) -> Bool {
+    private func firstBankImpact(from start: CGPoint, to end: CGPoint) -> (index: Int, fraction: CGFloat)? {
         var hit: Int?
         var time: CGFloat = 2
         for index in banks.indices {
@@ -480,8 +516,21 @@ struct SnowSimulation {
             hit = index
             time = impact
         }
-        guard let hit else { return false }
-        banks[hit].deposit(mass, at: start.x + (end.x - start.x) * time)
+        return hit.map { ($0, time) }
+    }
+
+    func snowImpact(from start: CGPoint, to end: CGPoint) -> (edge: DesktopEdge, fraction: CGFloat)? {
+        guard let hit = firstBankImpact(from: start, to: end) else { return nil }
+        let x = start.x + (end.x - start.x) * hit.fraction
+        // Empty columns are handled by the common window/desktop collision.
+        guard banks[hit.index].depth(at: x) > 0 else { return nil }
+        return (banks[hit.index].edge, hit.fraction)
+    }
+
+    @discardableResult
+    mutating func deposit(from start: CGPoint, to end: CGPoint, mass: CGFloat) -> Bool {
+        guard let hit = firstBankImpact(from: start, to: end) else { return false }
+        banks[hit.index].deposit(mass, at: start.x + (end.x - start.x) * hit.fraction)
         return true
     }
 

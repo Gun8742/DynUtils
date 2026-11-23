@@ -30,6 +30,7 @@ final class WeatherOverlay: NSObject {
 
     private let window: NSWindow
     private let renderer: ParticleView
+    var hasDeposits: Bool { renderer.hasDeposits }
 
     init(screen: NSScreen, style: Style, onSnowman: @escaping (WeatherOverlay.SnowmanUpdate) -> Void) {
         window = NSWindow(contentRect: screen.frame, styleMask: .borderless,
@@ -124,6 +125,8 @@ private final class ParticleView: NSView {
     private var coveredLedges: [Int: [ClosedRange<CGFloat>]] = [:]
     private var snowWalls: [DesktopSnowWall] = []
     private var snow = SnowSimulation()
+    private var materials = WeatherMaterials()
+    var hasDeposits: Bool { snow.hasDeposits || materials.hasDeposits }
     private var craft = SnowCraft()
     private var snowman: SnowmanPhysics?
     private var appliedSnowmanLayout: DecorationLayout?
@@ -134,17 +137,19 @@ private final class ParticleView: NSView {
     var style: WeatherOverlay.Style {
         didSet {
             guard oldValue != style else { return }
-            if oldValue.effect != style.effect || (style.visit?.visitor == .snowplough && oldValue.visit != style.visit) {
+            if oldValue.effect != style.effect {
                 elapsed = 0
                 nextEdgeSample = 0
-                edges = []
-                foregroundWindows = [:]
-                coveredLedges = [:]
-                snowWalls = []
+                materials.select(style.effect)
+                snow.clearAirborne()
+                snow.resetPointer()
+                snowman?.resetPointer()
+                lastSnowmanMovement = 0
+                if !snowing { craft = SnowCraft() }
+            }
+            if style.visit?.visitor == .snowplough, oldValue.visit != style.visit {
                 snow = SnowSimulation()
                 craft = SnowCraft()
-                lastSnowmanMovement = 0
-                snowman?.resetPointer()
             }
             if oldValue.snowCrafting != style.snowCrafting { craft = SnowCraft() }
             if oldValue.surfaceSnow != style.surfaceSnow || oldValue.props != style.props { nextEdgeSample = 0 }
@@ -166,6 +171,7 @@ private final class ParticleView: NSView {
         self.style = style
         self.onSnowman = onSnowman
         super.init(frame: frame)
+        materials.select(style.effect)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -196,7 +202,9 @@ private final class ParticleView: NSView {
         lastTick = now
         if style.effect == .off, style.visit?.expired != false { stop() }
 
-        let tracksSnowSurfaces = snowing && (style.surfaceSnow || style.props.contains(.snowman))
+        let material = WeatherMaterials.Kind(style.effect)
+        let tracksSnowSurfaces = style.effect != .off &&
+            (material != nil || hasDeposits || (snowing && (style.surfaceSnow || style.props.contains(.snowman))))
         let buttonDown = tracksSnowSurfaces && NSEvent.pressedMouseButtons & 1 != 0
         if buttonDown { followWindowsUntil = now + 0.18 }
         var sampledAt: TimeInterval?
@@ -213,10 +221,10 @@ private final class ParticleView: NSView {
             nextEdgeSample = tracksSnowSurfaces && now < followWindowsUntil ? now : now + 0.06
         }
 
-        if snowing, let frame = window?.frame, bounds.width > 0, bounds.height > 0 {
+        if style.effect != .off, let frame = window?.frame, bounds.width > 0, bounds.height > 0 {
             let heavy = style.effect == .heavySnow
             let divisor = style.reduceMotion ? 3 : (style.lowPower ? 2 : 1)
-            let count = particleBudget(base: heavy ? 290 : 185) / divisor
+            let count = snowing ? particleBudget(base: heavy ? 290 : 185) / divisor : 0
             let mouse = NSEvent.mouseLocation
             let cursor = CGPoint(x: mouse.x - frame.minX, y: mouse.y - frame.minY)
             let pointer = bounds.insetBy(dx: -25, dy: -25).contains(cursor) ? cursor : nil
@@ -224,8 +232,8 @@ private final class ParticleView: NSView {
             let ledges = style.surfaceSnow ? edges : []
             snow.sync(width: bounds.width, ground: style.groundSnow, ledges: ledges, coveredLedges: coveredLedges,
                       walls: style.surfaceSnow ? snowWalls : [], sampledAt: sampledAt)
-            let pressing = style.snowCrafting && NSEvent.pressedMouseButtons & 1 != 0
-            let crafted = style.snowCrafting
+            let pressing = snowing && style.snowCrafting && NSEvent.pressedMouseButtons & 1 != 0
+            let crafted = snowing && style.snowCrafting
                 ? snow.updateCraft(&craft, size: bounds.size,
                                    pointer: bounds.contains(cursor) ? cursor : nil, pressed: pressing, dt: dt)
                 : nil
@@ -237,10 +245,23 @@ private final class ParticleView: NSView {
                                                           y: crafted.origin.y / bounds.height,
                                                           snowballs: crafted.snowballs))
             } else {
-                snowmanUpdate = advanceSnowman(dt: dt, pointer: pressing ? nil : pointer)
+                snowmanUpdate = snowing ? advanceSnowman(dt: dt, pointer: pressing ? nil : pointer) : nil
             }
             snow.advance(dt: dt, size: bounds.size, count: count, heavy: heavy, limits: style.snowDepth,
                          wind: CGFloat(style.wind), pointer: pressing ? nil : pointer)
+            if sampledAt != nil || materials.surfaces[-1]?.maxX != bounds.width {
+                materials.setSurfaces(edges, width: bounds.width, covered: coveredLedges)
+            }
+            let emission: Int
+            switch material {
+            case .rain: emission = 245
+            case .drizzle: emission = 115
+            case .leaf: emission = 110
+            case .petal: emission = 145
+            case nil: emission = 0
+            }
+            materials.advance(dt: dt, size: bounds.size, count: particleBudget(base: emission) / divisor,
+                              wind: CGFloat(style.wind), pointer: pressing ? nil : pointer, snow: &snow)
             if let snowmanUpdate { onSnowman(snowmanUpdate) }
         }
         needsDisplay = true
@@ -291,8 +312,11 @@ private final class ParticleView: NSView {
         guard bounds.width > 0, bounds.height > 0,
               let context = NSGraphicsContext.current?.cgContext else { return }
         context.clear(dirtyRect)
-        if snowing {
+        if style.effect != .off {
             drawSnowBanks(in: context)
+            drawSettledMaterials(in: context)
+        }
+        if snowing {
             for ball in craft.visibleBalls {
                 DesktopDecoration.drawCraftBall(ball, in: context)
             }
@@ -310,38 +334,24 @@ private final class ParticleView: NSView {
         if let visit = style.visit, visit.age >= 0, !visit.expired {
             drawVisit(visit, in: context)
         }
-        if style.effect == .mist {
-            drawMist(in: context)
-            return
-        }
-
-        if style.effect == .starfall {
-            drawStarfall(in: context)
-            return
-        }
-
-        let count: Int
-        let speed: CGFloat
-        let color: NSColor
+        guard style.effect != .off else { return }
+        drawFallingSnow(in: context)
+        drawWeatherMaterials(in: context)
         switch style.effect {
-        case .off, .mist, .starfall: return
-        case .snow, .heavySnow:
-            drawFallingSnow(in: context)
-            return
-        case .drizzle: (count, speed, color) = (115, 290, NSColor(srgbRed: 0.80, green: 0.90, blue: 1, alpha: 1))
-        case .rain: (count, speed, color) = (245, 490, NSColor(srgbRed: 0.70, green: 0.84, blue: 1, alpha: 1))
-        case .leaves: (count, speed, color) = (110, 58, NSColor(srgbRed: 0.94, green: 0.58, blue: 0.20, alpha: 1))
-        case .sakura: (count, speed, color) = (145, 49, NSColor(srgbRed: 1, green: 0.68, blue: 0.78, alpha: 1))
-        case .fireflies: (count, speed, color) = (74, 10, NSColor(srgbRed: 1, green: 0.92, blue: 0.44, alpha: 1))
+        case .mist: drawMist(in: context)
+        case .starfall: drawStarfall(in: context)
+        case .fireflies: drawFireflies(in: context)
+        case .rain: drawRainSky(in: context)
+        default: break
         }
+    }
 
+    private func drawFireflies(in context: CGContext) {
         let divisor = style.reduceMotion ? 3 : (style.lowPower ? 2 : 1)
         let height = bounds.height + 90
         let width = bounds.width + 120
         let wind = CGFloat(style.wind) * 100
-        let budget = particleBudget(base: count)
-        let isDrizzle = style.effect == .drizzle
-        if let frame = window?.frame, style.effect == .leaves || style.effect == .fireflies {
+        if let frame = window?.frame {
             let mouse = NSEvent.mouseLocation
             let next = CGPoint(x: mouse.x - frame.minX, y: mouse.y - frame.minY)
             if hypot(next.x - pointer.x, next.y - pointer.y) >= 2 {
@@ -349,75 +359,31 @@ private final class ParticleView: NSView {
                 pointerStillSince = elapsed
             }
         }
-        context.setFillColor(color.cgColor)
-        context.setStrokeColor(color.cgColor)
-        for p in particles.prefix(budget / divisor) {
-            let travel = (p.y * height + elapsed * speed * p.speed).truncatingRemainder(dividingBy: height)
+        context.setFillColor(NSColor(srgbRed: 1, green: 0.92, blue: 0.44, alpha: 1).cgColor)
+        for p in particles.prefix(particleBudget(base: 74) / divisor) {
+            let travel = (p.y * height + elapsed * 10 * p.speed).truncatingRemainder(dividingBy: height)
             let x = (p.x * width + elapsed * wind + sin(elapsed * 0.65 + p.phase) * 17)
                 .truncatingRemainder(dividingBy: width)
             var point = CGPoint(x: (x < 0 ? x + width : x) - 60, y: height - travel - 45)
             let dx = point.x - pointer.x
             let dy = point.y - pointer.y
             let proximity = hypot(dx, dy)
-            if !style.reduceMotion && proximity > 0, proximity < 150 {
-                if style.effect == .leaves, elapsed - pointerStillSince < 0.38 {
-                    let displacement = (1 - proximity / 150) * 26
-                    point.x += dx / proximity * displacement
-                    point.y += dy / proximity * displacement
-                } else if style.effect == .fireflies {
-                    let attraction = min(1, max(0, elapsed - pointerStillSince - 0.75)) * 0.38
-                    point.x -= dx * attraction
-                    point.y -= dy * attraction
-                }
+            if !style.reduceMotion, proximity > 0, proximity < 150 {
+                let attraction = min(1, max(0, elapsed - pointerStillSince - 0.75)) * 0.38
+                point.x -= dx * attraction
+                point.y -= dy * attraction
             }
             let r = p.size * 1.2
-            context.setAlpha(0.80)
-            switch style.effect {
-            case .drizzle, .rain:
-                let trail = r * (isDrizzle ? 4 : 10)
-                if !isDrizzle, !style.reduceMotion,
-                   let edge = DesktopEdge.nearby(x: point.x, y: point.y, height: 10, edges: edges) {
-                    context.setAlpha(0.45)
-                    for offset in [-5.0, 4.0] {
-                        context.fillEllipse(in: CGRect(x: point.x + offset, y: edge.y + abs(offset) * 0.6,
-                                                       width: 2, height: 2))
-                    }
-                    continue
-                }
-                let slope = 0.28 * wind / 100
-                context.setAlpha(isDrizzle ? 0.35 : 0.59)
-                context.setLineWidth(isDrizzle ? 0.65 : 1.15)
-                context.move(to: point)
-                context.addLine(to: CGPoint(x: point.x - trail * slope, y: point.y + trail))
-                context.strokePath()
-            case .leaves, .sakura:
-                if style.effect == .sakura,
-                   let edge = DesktopEdge.nearby(x: point.x, y: point.y, height: 17, edges: edges) {
-                    point.y = edge.y + 1
-                }
-                context.saveGState()
-                context.translateBy(x: point.x, y: point.y)
-                context.rotate(by: elapsed * p.speed + p.phase)
-                context.move(to: CGPoint(x: -2.6 * r, y: 0))
-                context.addQuadCurve(to: CGPoint(x: 2.6 * r, y: 0), control: CGPoint(x: 0, y: 2.8 * r))
-                context.addQuadCurve(to: CGPoint(x: -2.6 * r, y: 0),
-                                     control: CGPoint(x: 0, y: (style.effect == .leaves ? -2 : -3.8) * r))
-                context.fillPath()
-                context.restoreGState()
-            case .fireflies:
-                let glow = 0.50 + 0.30 * sin(elapsed * 1.8 + p.phase)
-                context.setAlpha(glow * 0.19)
-                context.fillEllipse(in: CGRect(x: point.x - r * 3, y: point.y - r * 3,
-                                               width: 6 * r, height: 6 * r))
-                context.setAlpha(glow)
-                context.fillEllipse(in: CGRect(x: point.x - r, y: point.y - r, width: 2 * r, height: 2 * r))
-            default:
-                context.fillEllipse(in: CGRect(x: point.x, y: point.y, width: r * 2, height: r * 2))
-            }
+            let glow = 0.50 + 0.30 * sin(elapsed * 1.8 + p.phase)
+            context.setAlpha(glow * 0.19)
+            context.fillEllipse(in: CGRect(x: point.x - r * 3, y: point.y - r * 3, width: 6 * r, height: 6 * r))
+            context.setAlpha(glow)
+            context.fillEllipse(in: CGRect(x: point.x - r, y: point.y - r, width: 2 * r, height: 2 * r))
         }
-
         context.setAlpha(1)
-        guard style.effect == .rain else { return }
+    }
+
+    private func drawRainSky(in context: CGContext) {
         if style.rainbow {
             let center = CGPoint(x: bounds.width * 0.58, y: bounds.height * 0.12)
             for (index, hue) in [0.0, 0.11, 0.19, 0.33, 0.56, 0.69].enumerated() {
@@ -553,6 +519,91 @@ private final class ParticleView: NSView {
         context.restoreGState()
     }
 
+    private func omitForeground(on edgeID: Int, in region: CGRect, context: CGContext) {
+        for window in foregroundWindows[edgeID] ?? [] {
+            let covered = region.intersection(window)
+            guard !covered.isNull, !covered.isEmpty else { continue }
+            context.beginPath()
+            context.addRect(region)
+            context.addRect(covered)
+            context.clip(using: .evenOdd)
+        }
+    }
+
+    private func drawSettledMaterials(in context: CGContext) {
+        for patch in materials.puddles {
+            guard let edge = materials.surfaces[patch.edgeID] else { continue }
+            let x = edge.minX + (edge.maxX - edge.minX) * patch.offset
+            let y = edge.y + snow.depth(at: x, on: edge.id)
+            let width = 6 + patch.water * 15
+            let region = CGRect(x: x - width / 2, y: y, width: width, height: 1.2 + patch.water * 1.3)
+            context.saveGState()
+            omitForeground(on: edge.id, in: region, context: context)
+            context.setFillColor(NSColor(srgbRed: 0.36, green: 0.67, blue: 0.89,
+                                         alpha: min(0.48, patch.water * 0.32)).cgColor)
+            context.fillEllipse(in: region)
+            context.restoreGState()
+        }
+        for leaf in materials.litter where leaf.missing == 0 {
+            let x = leaf.x
+            let y = leaf.edge.y + snow.depth(at: x, on: leaf.edge.id) + leaf.layer + 1.5
+            context.saveGState()
+            omitForeground(on: leaf.edge.id, in: CGRect(x: x - 18, y: y - 12, width: 36, height: 26), context: context)
+            drawFoliage(leaf.particle, at: CGPoint(x: x, y: y), wet: leaf.wetness, in: context)
+            context.restoreGState()
+        }
+    }
+
+    private func drawWeatherMaterials(in context: CGContext) {
+        for group in [materials.falling, materials.loose] {
+            for p in group {
+                if p.kind.isWater {
+                    let featured = p.kind == .rain
+                    let trail: CGFloat = featured ? 0.031 : 0.022
+                    context.setStrokeColor(NSColor(srgbRed: 0.67, green: 0.83, blue: 1,
+                                                   alpha: featured ? 0.63 : 0.42).cgColor)
+                    context.setLineWidth(p.radius * (featured ? 1.14 : 0.74))
+                    context.move(to: p.point)
+                    context.addLine(to: CGPoint(x: p.point.x - p.velocity.dx * trail,
+                                                y: p.point.y - p.velocity.dy * trail))
+                    context.strokePath()
+                } else {
+                    drawFoliage(p, at: p.point, wet: 0, in: context)
+                }
+            }
+        }
+        for splash in materials.splashes {
+            context.setFillColor(NSColor(srgbRed: 0.76, green: 0.91, blue: 1,
+                                         alpha: min(0.78, splash.life * 4.4)).cgColor)
+            context.fillEllipse(in: CGRect(x: splash.point.x - 1, y: splash.point.y - 1, width: 2, height: 2))
+        }
+    }
+
+    private func drawFoliage(_ p: WeatherMaterials.Particle, at point: CGPoint, wet: CGFloat, in context: CGContext) {
+        let petal = p.kind == .petal
+        let tone = (sin(p.phase) + 1) / 2
+        let r = p.radius
+        context.saveGState()
+        context.translateBy(x: point.x, y: point.y)
+        context.rotate(by: p.angle)
+        context.setFillColor(NSColor(hue: petal ? 0.92 + tone * 0.07 : 0.034 + tone * 0.08,
+                                     saturation: petal ? 0.42 : 0.83,
+                                     brightness: (petal ? 0.99 : 0.77 + tone * 0.19) - wet * 0.22,
+                                     alpha: 0.92).cgColor)
+        context.move(to: CGPoint(x: -1.7 * r, y: 0))
+        context.addQuadCurve(to: CGPoint(x: 1.7 * r, y: 0), control: CGPoint(x: 0, y: r * 1.55))
+        context.addQuadCurve(to: CGPoint(x: -1.7 * r, y: 0), control: CGPoint(x: 0, y: -r * (petal ? 1.5 : 0.92)))
+        context.fillPath()
+        if !petal {
+            context.setStrokeColor(NSColor(srgbRed: 0.33, green: 0.16, blue: 0.07, alpha: 0.61).cgColor)
+            context.setLineWidth(0.55)
+            context.move(to: CGPoint(x: -1.72 * r, y: 0))
+            context.addQuadCurve(to: CGPoint(x: 1.42 * r, y: 0), control: CGPoint(x: -0.1 * r, y: r * 0.32))
+            context.strokePath()
+        }
+        context.restoreGState()
+    }
+
     private func drawSnowBanks(in context: CGContext) {
         let body = NSColor(srgbRed: 0.80, green: 0.89, blue: 0.98, alpha: 0.88).cgColor
         let rim = NSColor(srgbRed: 0.97, green: 0.99, blue: 1, alpha: 0.91).cgColor
@@ -567,14 +618,7 @@ private final class ParticleView: NSView {
 
             context.saveGState()
             defer { context.restoreGState() }
-            for window in foregroundWindows[bank.edge.id] ?? [] {
-                let covered = band.intersection(window)
-                guard !covered.isNull, !covered.isEmpty else { continue }
-                context.beginPath()
-                context.addRect(band)
-                context.addRect(covered)
-                context.clip(using: .evenOdd)
-            }
+            omitForeground(on: bank.edge.id, in: band, context: context)
             var column = 0
             while column < bank.depths.count {
                 guard bank.depths[column] >= 0.45 else {

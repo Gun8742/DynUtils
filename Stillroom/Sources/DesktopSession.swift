@@ -488,7 +488,11 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         let weatherScreens = causes.isEmpty && effect != .off
             ? NSScreen.screens.filter { !prefs.weatherDisabled.contains($0.displayKey) } : []
         let weatherIDs = Set(weatherScreens.map(\.displayKey))
-        let screens = NSScreen.screens.filter { weatherIDs.contains($0.displayKey) || placements[$0.displayKey]?.isEmpty == false || desktopVisits[$0.displayKey] != nil }
+        let screens = NSScreen.screens.filter {
+            let id = $0.displayKey
+            return weatherIDs.contains(id) || placements[id]?.isEmpty == false || desktopVisits[id] != nil
+                || overlays[id]?.hasDeposits == true
+        }
         let active = Set(screens.map(\.displayKey))
         for key in overlays.keys.filter({ !active.contains($0) }) {
             overlays.removeValue(forKey: key)?.close()
