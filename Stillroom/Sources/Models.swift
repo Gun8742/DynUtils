@@ -23,9 +23,17 @@ enum EffectDensity: String, CaseIterable, Codable, Identifiable {
 }
 
 enum WallpaperRule: String, CaseIterable, Codable, Identifiable {
-    case manual, matchEffect
+    case manual, matchEffect, dayNight, season, random
     var id: String { rawValue }
-    var title: String { self == .manual ? "Manual" : "Match effect" }
+    var title: String {
+        switch self {
+        case .manual: "Manual"
+        case .matchEffect: "Match effect"
+        case .dayNight: "Day & night"
+        case .season: "Season"
+        case .random: "Random"
+        }
+    }
 }
 
 enum Resolution: String, CaseIterable, Codable, Identifiable {
@@ -67,6 +75,23 @@ struct Preferences: Codable {
         get { effectDensity ?? .balanced }
         set { effectDensity = newValue }
     }
+    var groundSnow: Bool?
+    var surfaceSnow: Bool?
+    var deeperSnow: Bool?
+    var southernHemisphere: Bool?
+    var randomHours: Int?
+    var lastRandomSlot: Int?
+    var lastRandomWallpaper: String?
+    var automaticWallpaperKey: String?
+    var saverDelay: Int?
+    var saverScene: String?
+    var saverShuffle: Bool?
+    var desktopProps: [String: Set<DesktopProp>]?
+    var decorationLayouts: [String: [DesktopProp: DecorationLayout]]?
+    var automaticVisitors: Set<DesktopVisitor>?
+    var routeVisitorsAcrossDisplays: Bool?
+    var interfaceLanguage: String?
+    var effectsAboveWindows: Bool?
     var wind = 0.0
     var rainbow = false
     var lightning = false

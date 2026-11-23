@@ -42,8 +42,22 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     @Published private(set) var weatherStatus = "Off"
     @Published private(set) var loginStatus = SMAppService.mainApp.status
     @Published private(set) var loginError: String?
+    @Published private(set) var canUndoDecoration = false
+    private var decorationUndo: (display: String, props: Set<DesktopProp>, layouts: [DesktopProp: DecorationLayout])?
+    var interfaceLocale: Locale {
+        guard let language = prefs.interfaceLanguage, language != "system" else { return .autoupdatingCurrent }
+        return Locale(identifier: language)
+    }
+    private var desktopVisits: [String: DesktopVisit] = [:]
+    private var nextAutomaticVisit = Date().addingTimeInterval(120)
 
     private var overlays: [String: WeatherOverlay] = [:]
+    private let screenSaver = DesktopSaver()
+    private var saverIdleReset = Date()
+    private var nextSaverSceneID: String?
+    private var guideEffect: Effect?
+    private var lastScheduledCheck: Date?
+    @Published private(set) var displaySleepMinutes: Int?
     private var priorWallpapers: [String: Snapshot] = [:]
     private var pauseReasons: Set<Pause> = []
     private var powerTimer: Timer?
@@ -61,7 +75,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
             nc.addObserver(self, selector: selector, name: name, object: nil)
         }
         NotificationCenter.default.addObserver(
-            self, selector: #selector(refresh), name: NSApplication.didChangeScreenParametersNotification, object: nil
+            self, selector: #selector(displayConfigurationChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil
         )
         let distributed = DistributedNotificationCenter.default()
         distributed.addObserver(self, selector: #selector(screenLocked),
@@ -79,12 +93,35 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         loginStatus = SMAppService.mainApp.status
+        displaySleepMinutes = DesktopSaver.readDisplaySleepMinutes()
         refresh()
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        screenSaver.stop(restoreFocus: false)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         powerTimer?.invalidate()
+        screenSaver.onDismiss = nil
+        screenSaver.stop(restoreFocus: false)
         closeOverlays()
+    }
+
+    func showScreenSaver(_ wallpaper: Wallpaper) -> Bool {
+        guard pauseReasons.isEmpty else { return false }
+        screenSaver.onDismiss = { [weak self] in
+            self?.saverIdleReset = Date()
+            self?.reconcileWeather()
+        }
+        guard screenSaver.show(wallpaper) else { return false }
+        reconcileWeather()
+        return true
+    }
+
+    @objc private func displayConfigurationChanged() {
+        screenSaver.stop(restoreFocus: false)
+        refresh()
     }
 
     func selectEffect(_ effect: Effect) {
@@ -92,6 +129,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         var updated = prefs
         updated.effect = effect
         if effect != .off { updated.lastEffect = effect }
+        else { desktopVisits.removeAll() }
         prefs = updated
         if prefs.rule == .matchEffect { applyMatchedWallpaper() }
     }
@@ -99,7 +137,56 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     func setRule(_ rule: WallpaperRule) {
         guard prefs.rule != rule else { return }
         prefs.rule = rule
+        prefs.automaticWallpaperKey = nil
         if rule == .matchEffect { applyMatchedWallpaper() }
+        else { updateScheduledWallpaper() }
+    }
+
+    func updateScheduledWallpaper(now: Date = .now, calendar: Calendar = .autoupdatingCurrent) {
+        guard pauseReasons.isEmpty, !screenSaver.isRunning else { return }
+        let salt = Wallpaper.catalog[0]
+        let amber = Wallpaper.catalog[1]
+        let key: String
+        let wallpaper: Wallpaper
+        switch prefs.rule {
+        case .manual, .matchEffect:
+            return
+        case .dayNight:
+            let hour = calendar.component(.hour, from: now)
+            wallpaper = (6..<18).contains(hour) ? amber : salt
+            key = "dayNight:" + wallpaper.id
+        case .season:
+            let month = calendar.component(.month, from: now)
+            let warm = (3...8).contains(month) != (prefs.southernHemisphere == true)
+            wallpaper = warm ? amber : salt
+            key = "season:" + wallpaper.id
+        case .random:
+            let interval = max(1, min(24, prefs.randomHours ?? 3))
+            let slot = Int(now.timeIntervalSince1970 / Double(interval * 3_600))
+            if prefs.lastRandomSlot == slot,
+               let saved = Wallpaper.catalog.first(where: { $0.id == prefs.lastRandomWallpaper }) {
+                wallpaper = saved
+            } else {
+                wallpaper = Wallpaper.catalog.filter { $0.id != prefs.lastRandomWallpaper }.randomElement() ?? salt
+                prefs.lastRandomSlot = slot
+                prefs.lastRandomWallpaper = wallpaper.id
+            }
+            key = "random:\(interval):\(slot)"
+        }
+        let screens = NSScreen.screens
+        guard !screens.isEmpty, prefs.automaticWallpaperKey != key else { return }
+        prefs.automaticWallpaperKey = key
+        prefs.defaultWallpaper = wallpaper.id
+        for screen in screens {
+            prefs.desired[screen.displayKey] = wallpaper.id
+            apply(wallpaper, on: screen)
+        }
+        readDisplays()
+    }
+
+    func previewGuideEffect(_ effect: Effect?) {
+        guideEffect = effect
+        reconcileWeather()
     }
 
     func apply(_ wallpaper: Wallpaper, to target: String?) {
@@ -153,7 +240,87 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         loginStatus = SMAppService.mainApp.status
     }
 
+    func decoration(_ prop: DesktopProp, on display: String) -> Bool {
+        prefs.desktopProps?[display]?.contains(prop) == true
+    }
+
+    func setDecoration(_ prop: DesktopProp, on display: String, enabled: Bool) {
+        var saved = prefs.desktopProps ?? [:]
+        var props = saved[display] ?? []
+        rememberDecorations(on: display)
+        canUndoDecoration = true
+        if enabled { props.insert(prop) }
+        else {
+            props.remove(prop)
+            prefs.decorationLayouts?[display]?[prop] = nil
+        }
+        saved[display] = props.isEmpty ? nil : props
+        prefs.desktopProps = saved
+    }
+
+    func undoDecoration() {
+        guard let previous = decorationUndo else { return }
+        var saved = prefs.desktopProps ?? [:]
+        saved[previous.display] = previous.props.isEmpty ? nil : previous.props
+        prefs.desktopProps = saved
+        var layouts = prefs.decorationLayouts ?? [:]
+        layouts[previous.display] = previous.layouts.isEmpty ? nil : previous.layouts
+        prefs.decorationLayouts = layouts
+        decorationUndo = nil
+        canUndoDecoration = false
+    }
+
+    private func rememberDecorations(on display: String) {
+        decorationUndo = (display, prefs.desktopProps?[display] ?? [], prefs.decorationLayouts?[display] ?? [:])
+        canUndoDecoration = true
+    }
+
+    func decorationLayout(_ prop: DesktopProp, on display: String) -> DecorationLayout {
+        prefs.decorationLayouts?[display]?[prop] ?? .initial(prop)
+    }
+
+    func updateDecoration(_ prop: DesktopProp, on display: String, layout: DecorationLayout) {
+        guard decoration(prop, on: display), layout != decorationLayout(prop, on: display) else { return }
+        rememberDecorations(on: display)
+        var layouts = prefs.decorationLayouts ?? [:]
+        layouts[display, default: [:]][prop] = layout
+        prefs.decorationLayouts = layouts
+    }
+
+    func setAutomaticVisitor(_ visitor: DesktopVisitor, enabled: Bool) {
+        var selected = prefs.automaticVisitors ?? []
+        if enabled { selected.insert(visitor) } else { selected.remove(visitor) }
+        prefs.automaticVisitors = selected
+        nextAutomaticVisit = Date().addingTimeInterval(120)
+    }
+
+    func playVisitor(_ visitor: DesktopVisitor) {
+        guard pauseReasons.isEmpty, !screenSaver.isRunning else { return }
+        let screens = NSScreen.screens.sorted {
+            if $0.frame.minX != $1.frame.minX { return $0.frame.minX < $1.frame.minX }
+            return $0.frame.minY > $1.frame.minY
+        }
+        let route = prefs.routeVisitorsAcrossDisplays == true ? screens : Array(NSScreen.screens.prefix(1))
+        let now = ProcessInfo.processInfo.systemUptime
+        desktopVisits = Dictionary(uniqueKeysWithValues: route.enumerated().map {
+            ($0.element.displayKey, DesktopVisit(visitor: visitor, start: now + Double($0.offset) * DesktopVisit.duration))
+        })
+        nextAutomaticVisit = Date().addingTimeInterval(120)
+        reconcileWeather()
+    }
+
+    func throwSnowball(on display: String) {
+        guard pauseReasons.isEmpty, !screenSaver.isRunning,
+              NSScreen.screens.contains(where: { $0.displayKey == display }) else { return }
+        desktopVisits = [display: DesktopVisit(visitor: nil, start: ProcessInfo.processInfo.systemUptime)]
+        reconcileWeather()
+    }
+
     func resetPreferences() {
+        desktopVisits.removeAll()
+        nextAutomaticVisit = Date().addingTimeInterval(120)
+        decorationUndo = nil
+        canUndoDecoration = false
         prefs = Preferences()
         refresh()
     }
@@ -242,38 +409,86 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         return IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? == kIOPSBatteryPowerValue
     }
 
-    @objc private func powerChanged() { reconcileWeather() }
+    @objc private func powerChanged() {
+        let now = Date()
+        if lastScheduledCheck.map({ now.timeIntervalSince($0) >= 20 || now < $0 }) ?? true {
+            lastScheduledCheck = now
+            updateScheduledWallpaper(now: now)
+        }
+        startSaverIfIdle(now: now)
+        if now >= nextAutomaticVisit, pauseReasons.isEmpty, !screenSaver.isRunning,
+           let visitor = prefs.automaticVisitors?.randomElement() { playVisitor(visitor) }
+        reconcileWeather()
+    }
+
+    private func startSaverIfIdle(now: Date) {
+        let delay = prefs.saverDelay ?? 0
+        guard DesktopSaver.delays.contains(delay), delay > 0, prefs.onboardingComplete,
+              pauseReasons.isEmpty, !screenSaver.isRunning, guideEffect == nil,
+              DesktopSaver.idleThresholdReached(delay: delay, idleSeconds: DesktopSaver.idleSeconds,
+                sinceReset: now.timeIntervalSince(saverIdleReset), systemSleepMinutes: displaySleepMinutes),
+              !DesktopSaver.mediaKeepsDisplayAwake else { return }
+        let scene: Wallpaper
+        if prefs.saverShuffle == true {
+            scene = Wallpaper.catalog.filter { $0.id != nextSaverSceneID }.randomElement() ?? Wallpaper.catalog[0]
+            nextSaverSceneID = scene.id
+        } else {
+            scene = Wallpaper.catalog.first { $0.id == prefs.saverScene } ?? Wallpaper.catalog[0]
+        }
+        _ = showScreenSaver(scene)
+    }
 
     private func reconcileWeather() {
-        let effect = prefs.effect
+        let effect = guideEffect ?? prefs.effect
+        if screenSaver.isRunning {
+            closeOverlays()
+            weatherStatus = effect == .off ? "Off" : "Paused: screen saver"
+            return
+        }
         let battery = onBattery
         var causes: [String] = []
-        if prefs.manualPause { causes.append("manual") }
+        if prefs.manualPause, guideEffect == nil { causes.append("manual") }
         if prefs.pauseOnBattery && battery { causes.append("on battery") }
         if pauseReasons.contains(.lock) { causes.append("screen locked") }
         if pauseReasons.contains(.sleeping) { causes.append("display asleep") }
         if pauseReasons.contains(.inactive) { causes.append("inactive session") }
-        guard effect != .off, causes.isEmpty else {
+        if !pauseReasons.isEmpty {
             closeOverlays()
             weatherStatus = effect == .off ? "Off" : "Paused: " + causes.joined(separator: ", ")
             return
         }
-        let screens = NSScreen.screens.filter { !prefs.weatherDisabled.contains($0.displayKey) }
+        let connected = Set(NSScreen.screens.map(\.displayKey))
+        desktopVisits = desktopVisits.filter { connected.contains($0.key) && !$0.value.expired }
+        let placements = prefs.desktopProps ?? [:]
+        let weatherScreens = causes.isEmpty && effect != .off
+            ? NSScreen.screens.filter { !prefs.weatherDisabled.contains($0.displayKey) } : []
+        let weatherIDs = Set(weatherScreens.map(\.displayKey))
+        let screens = NSScreen.screens.filter { weatherIDs.contains($0.displayKey) || placements[$0.displayKey]?.isEmpty == false || desktopVisits[$0.displayKey] != nil }
         let active = Set(screens.map(\.displayKey))
         for key in overlays.keys.filter({ !active.contains($0) }) {
             overlays.removeValue(forKey: key)?.close()
         }
-        let style = WeatherOverlay.Style(
-            effect: effect, density: prefs.density, wind: prefs.wind,
-            reduceMotion: prefs.reduceMotion || workspace.accessibilityDisplayShouldReduceMotion,
-            lowPower: battery || ProcessInfo.processInfo.isLowPowerModeEnabled,
-            rainbow: prefs.rainbow, lightning: prefs.lightning
-        )
+        let reduced = prefs.reduceMotion || workspace.accessibilityDisplayShouldReduceMotion
+        let lowPower = battery || ProcessInfo.processInfo.isLowPowerModeEnabled
         for screen in screens {
-            if let overlay = overlays[screen.displayKey] { overlay.update(screen: screen, style: style) }
-            else { overlays[screen.displayKey] = WeatherOverlay(screen: screen, style: style) }
+            let id = screen.displayKey
+            let style = WeatherOverlay.Style(
+                effect: weatherIDs.contains(id) ? effect : .off, density: prefs.density, wind: prefs.wind,
+                reduceMotion: reduced, lowPower: lowPower, rainbow: prefs.rainbow,
+                lightning: prefs.lightning, groundSnow: prefs.groundSnow == true,
+                surfaceSnow: prefs.surfaceSnow == true, deeperSnow: prefs.deeperSnow == true,
+                props: placements[id] ?? [], layouts: prefs.decorationLayouts?[id] ?? [:],
+                visit: desktopVisits[id], aboveWindows: prefs.effectsAboveWindows == true
+            )
+            if let overlay = overlays[id] { overlay.update(screen: screen, style: style) }
+            else { overlays[id] = WeatherOverlay(screen: screen, style: style) }
         }
-        weatherStatus = screens.isEmpty ? "No displays enabled" : "\(effect.title) · \(screens.count) display(s)"
+        if effect == .off { weatherStatus = "Off" }
+        else if !causes.isEmpty { weatherStatus = "Paused: " + causes.joined(separator: ", ") }
+        else {
+            weatherStatus = weatherScreens.isEmpty ? "No displays enabled"
+                : "\(effect.title) · \(weatherScreens.count) display(s)"
+        }
     }
 
     private func closeOverlays() {
@@ -282,14 +497,22 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     }
 
     private func pause(_ reason: Pause, _ paused: Bool) {
-        if paused { pauseReasons.insert(reason) } else { pauseReasons.remove(reason) }
+        saverIdleReset = Date()
+        if paused {
+            pauseReasons.insert(reason)
+            desktopVisits.removeAll()
+            nextAutomaticVisit = Date().addingTimeInterval(120)
+            screenSaver.stop(restoreFocus: false)
+        } else {
+            pauseReasons.remove(reason)
+        }
         reconcileWeather()
     }
 
     @objc private func screenLocked() { pause(.lock, true) }
     @objc private func screenUnlocked() { pause(.lock, false) }
     @objc private func screenSlept() { pause(.sleeping, true) }
-    @objc private func screenWoke() { pause(.sleeping, false); refresh() }
+    @objc private func screenWoke() { pause(.sleeping, false); updateScheduledWallpaper(); refresh() }
     @objc private func sessionInactive() { pause(.inactive, true) }
     @objc private func sessionActive() { pause(.inactive, false); refresh() }
 }

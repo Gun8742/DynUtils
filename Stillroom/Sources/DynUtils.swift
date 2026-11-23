@@ -8,12 +8,12 @@ struct DynUtils: App {
 
     var body: some Scene {
         Window("DynUtils", id: "main") {
-            Studio(session: session)
+            Studio(session: session).environment(\.locale, session.interfaceLocale)
         }
         .defaultSize(width: 900, height: 660)
 
         MenuBarExtra("DynUtils", systemImage: "cloud.snow") {
-            QuickControls(session: session)
+            QuickControls(session: session).environment(\.locale, session.interfaceLocale)
         }
     }
 }
@@ -30,16 +30,21 @@ private struct QuickControls: View {
                 session.selectEffect(session.prefs.lastEffect)
             }
         } else {
-            Button(session.prefs.manualPause ? "Resume weather" : "Pause weather") {
+            Button(LocalizedStringKey(session.prefs.manualPause ? "Resume weather" : "Pause weather")) {
                 session.prefs.manualPause.toggle()
             }
         }
         Menu("Choose effect") {
             ForEach(Effect.allCases) { effect in
-                Button(effect.title) { session.selectEffect(effect) }
+                Button(LocalizedStringKey(effect.title)) { session.selectEffect(effect) }
             }
         }
         Divider()
+        Menu("Desktop visitors") {
+            ForEach(DesktopVisitor.allCases) { visitor in
+                Button(LocalizedStringKey(visitor.title)) { session.playVisitor(visitor) }
+            }
+        }
         Button("Open DynUtils") {
             openWindow(id: "main")
             NSApp.activate()
@@ -67,6 +72,10 @@ private struct Studio: View {
     @State private var section: Section = .wallpapers
     @State private var selectedWallpaper = Wallpaper.catalog[0].id
     @State private var target: String? = nil
+    @State private var decorationDisplay: String?
+    @State private var showGuide = false
+    @State private var showSaverPreview = false
+    @State private var saverError: String?
 
     private var scene: Wallpaper {
         Wallpaper.catalog.first { $0.id == selectedWallpaper } ?? Wallpaper.catalog[0]
@@ -94,7 +103,7 @@ private struct Studio: View {
                     Text("DynUtils").font(.title2.bold()).padding(.bottom, 10)
                     ForEach(Section.allCases) { item in
                         Button { section = item } label: {
-                            Label(item.rawValue.capitalized, systemImage: item.icon)
+                            Label(LocalizedStringKey(item.rawValue.capitalized), systemImage: item.icon)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(8)
                                 .background(section == item ? Color.accentColor.opacity(0.15) : .clear,
@@ -112,7 +121,7 @@ private struct Studio: View {
                 Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        Text(section.rawValue.capitalized).font(.largeTitle.bold())
+                        Text(LocalizedStringKey(section.rawValue.capitalized)).font(.largeTitle.bold())
                         switch section {
                         case .wallpapers: wallpapers
                         case .effects: effects
@@ -155,11 +164,29 @@ private struct Studio: View {
                     get: { session.prefs.resolution[scene.id] ?? .auto },
                     set: { session.prefs.resolution[scene.id] = $0 }
                 )) {
-                    ForEach(Resolution.allCases) { Text($0.title).tag($0) }
+                    ForEach(Resolution.allCases) { Text(LocalizedStringKey($0.title)).tag($0) }
                 }
                 Picker("Scene rule", selection: Binding(get: { session.prefs.rule }, set: { session.setRule($0) })) {
-                    ForEach(WallpaperRule.allCases) { Text($0.title).tag($0) }
+                    ForEach(WallpaperRule.allCases) { Text(LocalizedStringKey($0.title)).tag($0) }
                 }
+            }
+            if session.prefs.rule == .season {
+                Toggle("Southern Hemisphere", isOn: Binding(
+                    get: { session.prefs.southernHemisphere == true },
+                    set: { session.prefs.southernHemisphere = $0; session.updateScheduledWallpaper() }
+                ))
+            }
+            if session.prefs.rule == .random {
+                Picker("Change every", selection: Binding(
+                    get: { session.prefs.randomHours ?? 3 },
+                    set: {
+                        session.prefs.randomHours = $0
+                        session.prefs.lastRandomSlot = nil
+                        session.updateScheduledWallpaper()
+                    }
+                )) {
+                    ForEach([1, 3, 6, 12, 24], id: \.self) { Text("\($0) hr").tag($0) }
+                }.fixedSize()
             }
             if session.prefs.resolution[scene.id] == .ultrawide {
                 Text("This scene uses the standard image when a wide version is unavailable.")
@@ -226,10 +253,10 @@ private struct Studio: View {
             Text("Effects run independently of your wallpaper unless Match effect is enabled.")
                 .foregroundStyle(.secondary)
             Picker("Weather", selection: Binding(get: { session.prefs.effect }, set: { session.selectEffect($0) })) {
-                ForEach(Effect.allCases) { Text($0.title).tag($0) }
+                ForEach(Effect.allCases) { Text(LocalizedStringKey($0.title)).tag($0) }
             }.fixedSize()
             Picker("Density", selection: $session.prefs.density) {
-                ForEach(EffectDensity.allCases) { Text($0.title).tag($0) }
+                ForEach(EffectDensity.allCases) { Text(LocalizedStringKey($0.title)).tag($0) }
             }
             .pickerStyle(.segmented)
             .accessibilityLabel("Effect density")
@@ -241,12 +268,26 @@ private struct Studio: View {
                     .monospacedDigit().frame(width: 54)
                 Button("Reset") { session.prefs.wind = 0 }
             }
+            if session.prefs.effect == .snow || session.prefs.effect == .heavySnow {
+                Toggle("Accumulate snow at the bottom", isOn: Binding(
+                    get: { session.prefs.groundSnow == true },
+                    set: { session.prefs.groundSnow = $0 }
+                ))
+                Toggle("Accumulate snow on windows and Dock", isOn: Binding(
+                    get: { session.prefs.surfaceSnow == true },
+                    set: { session.prefs.surfaceSnow = $0 }
+                ))
+                Toggle("Deeper snow", isOn: Binding(
+                    get: { session.prefs.deeperSnow == true },
+                    set: { session.prefs.deeperSnow = $0 }
+                ))
+            }
             if session.prefs.effect == .rain {
                 Toggle("Rainbow", isOn: $session.prefs.rainbow)
                 Toggle("Lightning", isOn: $session.prefs.lightning)
             }
             Text(session.weatherStatus).foregroundStyle(.secondary)
-            Button(session.prefs.manualPause ? "Resume weather" : "Pause weather") {
+            Button(LocalizedStringKey(session.prefs.manualPause ? "Resume weather" : "Pause weather")) {
                 session.prefs.manualPause.toggle()
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
@@ -269,9 +310,21 @@ private struct Studio: View {
             }
             Divider()
             Text("Power & motion").font(.headline)
+            Picker("Language", selection: Binding(
+                get: { session.prefs.interfaceLanguage ?? "system" },
+                set: { session.prefs.interfaceLanguage = $0 }
+            )) {
+                Text("System language").tag("system")
+                Text("English").tag("en")
+                Text("ไทย").tag("th")
+            }.fixedSize()
+            Toggle("Show effects above windows", isOn: Binding(
+                get: { session.prefs.effectsAboveWindows == true },
+                set: { session.prefs.effectsAboveWindows = $0 }
+            ))
             Toggle("Pause on battery", isOn: $session.prefs.pauseOnBattery)
             Toggle("Reduce motion", isOn: $session.prefs.reduceMotion)
-            Text("Weather runs behind windows at up to 30 FPS.")
+            Text("Weather runs at up to 30 FPS and does not intercept clicks.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Open at login", isOn: Binding(
                 get: { session.loginStatus == .enabled || session.loginStatus == .requiresApproval },
@@ -282,7 +335,114 @@ private struct Studio: View {
             }
             if let error = session.loginError { Text(error).foregroundStyle(.secondary) }
             Divider()
+            Text("Desktop decorations").font(.headline)
+            if let first = session.displays.first {
+                let display = session.displays.first { $0.id == decorationDisplay } ?? first
+                Picker("Decorate display", selection: Binding(
+                    get: { display.id }, set: { decorationDisplay = $0 }
+                )) {
+                    ForEach(session.displays) { Text($0.name).tag($0.id) }
+                }.fixedSize()
+                ForEach(DesktopProp.allCases) { prop in
+                    Toggle(LocalizedStringKey(prop.title), isOn: Binding(
+                        get: { session.decoration(prop, on: display.id) },
+                        set: { session.setDecoration(prop, on: display.id, enabled: $0) }
+                    ))
+                }
+                DecorationEditor(session: session, display: display.id)
+                Button("Throw snowball") { session.throwSnowball(on: display.id) }
+                Button("Undo decoration change") { session.undoDecoration() }
+                    .disabled(!session.canUndoDecoration)
+            } else {
+                Text("Connect a display to place decorations.").foregroundStyle(.secondary)
+            }
+            Divider()
+            DisclosureGroup("Desktop visitors") {
+                Toggle("Travel across displays", isOn: Binding(
+                    get: { session.prefs.routeVisitorsAcrossDisplays == true },
+                    set: { session.prefs.routeVisitorsAcrossDisplays = $0 }
+                ))
+                ForEach(DesktopVisitor.allCases) { visitor in
+                    HStack {
+                        Toggle(LocalizedStringKey(visitor.title), isOn: Binding(
+                            get: { session.prefs.automaticVisitors?.contains(visitor) == true },
+                            set: { session.setAutomaticVisitor(visitor, enabled: $0) }
+                        ))
+                        Spacer()
+                        Button("Play") { session.playVisitor(visitor) }
+                            .accessibilityLabel("Play \(visitor.title)")
+                    }
+                }
+            }
+            Divider()
+            screenSaverControls
+            Divider()
+            Button("Guide and what’s new") { showGuide = true }
+                .sheet(isPresented: $showGuide, onDismiss: { session.previewGuideEffect(nil) }) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("DynUtils Guide").font(.title.bold())
+                        Text("Choose a demo, then look at the desktop. Closing this guide returns to your selected weather.")
+                        ForEach(Effect.allCases.filter { $0 != .off }) { effect in
+                            Button("Try \(effect.title)") { session.previewGuideEffect(effect) }
+                        }
+                        Divider()
+                        Text("What’s new").font(.headline)
+                        Text("Window snow, desktop decorations, scheduled wallpapers, and the idle screen saver.")
+                        Button("Done") { showGuide = false }.keyboardShortcut(.cancelAction)
+                    }.padding(24).frame(width: 410, alignment: .leading)
+                }
             Button("Reset preferences") { session.resetPreferences() }
+        }
+    }
+
+    private var screenSaverControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            let scene = Wallpaper.catalog.first { $0.id == (session.prefs.saverScene ?? Wallpaper.catalog[0].id) } ?? Wallpaper.catalog[0]
+            Text("Screen Saver").font(.headline)
+            Picker("Scene", selection: Binding(
+                get: { session.prefs.saverScene ?? Wallpaper.catalog[0].id },
+                set: { session.prefs.saverScene = $0 }
+            )) {
+                ForEach(Wallpaper.catalog) { Text($0.title).tag($0.id) }
+            }.fixedSize()
+            HStack {
+                Button("Preview") { showSaverPreview = true }
+                Button("Start on all displays") {
+                    saverError = session.showScreenSaver(scene) ? nil : "Couldn’t start the screen saver."
+                }
+            }
+            Picker("Start after inactivity", selection: Binding(
+                get: { session.prefs.saverDelay ?? 0 }, set: { session.prefs.saverDelay = $0 }
+            )) {
+                ForEach(DesktopSaver.delays, id: \.self) { delay in
+                    Text(delay == 0 ? "Off" : "\(delay) min").tag(delay)
+                }
+            }.fixedSize()
+            Toggle("Shuffle scenes on automatic starts", isOn: Binding(
+                get: { session.prefs.saverShuffle == true }, set: { session.prefs.saverShuffle = $0 }
+            ))
+            if let system = session.displaySleepMinutes, let delay = session.prefs.saverDelay,
+               delay > 0, system <= delay {
+                Text("macOS turns off the display after \(system) min. Choose a shorter DynUtils timer or adjust Lock Screen settings.")
+                    .foregroundStyle(.secondary)
+                Button("Open System Settings") {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+                }
+            }
+            Text("Press a key or move the pointer to exit. macOS controls screen locking.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let saverError { Text(saverError).foregroundStyle(.secondary) }
+        }
+        .sheet(isPresented: $showSaverPreview) {
+            let scene = Wallpaper.catalog.first { $0.id == (session.prefs.saverScene ?? Wallpaper.catalog[0].id) } ?? Wallpaper.catalog[0]
+            VStack(alignment: .leading, spacing: 14) {
+                Text(scene.title).font(.headline)
+                wallpaperPreview(scene)
+                Button("Done") { showSaverPreview = false }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(24)
+            .frame(width: 560)
         }
     }
 }
