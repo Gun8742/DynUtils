@@ -40,6 +40,11 @@ private struct QuickControls: View {
             }
         }
         Divider()
+        Menu("Desktop visitors") {
+            ForEach(DesktopVisitor.allCases) { visitor in
+                Button(visitor.title) { session.playVisitor(visitor) }
+            }
+        }
         Button("Open DynUtils") {
             openWindow(id: "main")
             NSApp.activate()
@@ -332,10 +337,30 @@ private struct Studio: View {
                         set: { session.setDecoration(prop, on: display.id, enabled: $0) }
                     ))
                 }
+                DecorationEditor(session: session, display: display.id)
+                Button("Throw snowball") { session.throwSnowball(on: display.id) }
                 Button("Undo decoration change") { session.undoDecoration() }
                     .disabled(!session.canUndoDecoration)
             } else {
                 Text("Connect a display to place decorations.").foregroundStyle(.secondary)
+            }
+            Divider()
+            DisclosureGroup("Desktop visitors") {
+                Toggle("Travel across displays", isOn: Binding(
+                    get: { session.prefs.routeVisitorsAcrossDisplays == true },
+                    set: { session.prefs.routeVisitorsAcrossDisplays = $0 }
+                ))
+                ForEach(DesktopVisitor.allCases) { visitor in
+                    HStack {
+                        Toggle(visitor.title, isOn: Binding(
+                            get: { session.prefs.automaticVisitors?.contains(visitor) == true },
+                            set: { session.setAutomaticVisitor(visitor, enabled: $0) }
+                        ))
+                        Spacer()
+                        Button("Play") { session.playVisitor(visitor) }
+                            .accessibilityLabel("Play \(visitor.title)")
+                    }
+                }
             }
             Divider()
             screenSaverControls

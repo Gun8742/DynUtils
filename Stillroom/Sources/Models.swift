@@ -87,6 +87,10 @@ struct Preferences: Codable {
     var saverScene: String?
     var saverShuffle: Bool?
     var desktopProps: [String: Set<DesktopProp>]?
+    var decorationLayouts: [String: [DesktopProp: DecorationLayout]]?
+    var automaticVisitors: Set<DesktopVisitor>?
+    var routeVisitorsAcrossDisplays: Bool?
+    var interfaceLanguage: String?
     var wind = 0.0
     var rainbow = false
     var lightning = false

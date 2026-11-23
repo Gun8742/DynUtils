@@ -15,6 +15,8 @@ final class WeatherOverlay: NSObject {
         var surfaceSnow: Bool
         var deeperSnow: Bool
         var props: Set<DesktopProp>
+        var layouts: [DesktopProp: DecorationLayout]
+        var visit: DesktopVisit?
     }
 
     private let window: NSWindow
@@ -57,7 +59,8 @@ final class WeatherOverlay: NSObject {
     }
 
     @objc private func visibilityChanged() {
-        if window.occlusionState.contains(.visible), renderer.style.effect != .off {
+        if window.occlusionState.contains(.visible),
+           renderer.style.effect != .off || renderer.style.visit?.expired == false {
             renderer.start()
         } else {
             renderer.stop()
@@ -103,7 +106,7 @@ private final class ParticleView: NSView {
     var style: WeatherOverlay.Style {
         didSet {
             guard oldValue != style else { return }
-            if oldValue.effect != style.effect {
+            if oldValue.effect != style.effect || (style.visit?.visitor == .snowplough && oldValue.visit != style.visit) {
                 elapsed = 0
                 nextEdgeSample = 0
                 edges = []
@@ -139,6 +142,7 @@ private final class ParticleView: NSView {
         let now = CACurrentMediaTime()
         elapsed += min(now - lastTick, 0.1) * (style.reduceMotion ? 0.35 : 1)
         lastTick = now
+        if style.effect == .off, style.visit?.expired != false { stop() }
         needsDisplay = true
     }
 
@@ -148,7 +152,8 @@ private final class ParticleView: NSView {
         context.clear(dirtyRect)
         let snowing = style.effect == .snow || style.effect == .heavySnow
         if let window, elapsed >= nextEdgeSample,
-           (snowing && (style.surfaceSnow || !edgeDepth.isEmpty)) || [.rain, .sakura, .starfall].contains(style.effect) {
+           (snowing && (style.surfaceSnow || !edgeDepth.isEmpty))
+                || [.rain, .sakura, .starfall].contains(style.effect) || (style.visit != nil && style.visit?.visitor == nil) {
             edges = DesktopEdge.visible(in: window.frame)
             edgeDepth = edgeDepth.filter { id, _ in edges.contains { $0.id == id } }
             for edge in edges where snowing {
@@ -168,9 +173,12 @@ private final class ParticleView: NSView {
             }
         }
         if !style.props.isEmpty {
-            DesktopDecoration.draw(style.props, in: context, bounds: bounds)
+            DesktopDecoration.draw(style.props, layouts: style.layouts, in: context, bounds: bounds)
         }
 
+        if let visit = style.visit, visit.age >= 0, !visit.expired {
+            drawVisit(visit, in: context)
+        }
         if style.effect == .mist {
             drawMist(in: context)
             return
@@ -353,6 +361,49 @@ private final class ParticleView: NSView {
             context.setFillColor(gray: 1, alpha: 0.95)
             context.fillEllipse(in: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2))
             context.restoreGState()
+        }
+    }
+
+    private func drawVisit(_ visit: DesktopVisit, in context: CGContext) {
+        let age = visit.age
+        if let visitor = visit.visitor {
+            let progress = style.reduceMotion ? 0.5 : age / DesktopVisit.duration
+            let x = bounds.width * (0.06 + 0.88 * progress)
+            let y: CGFloat = 58
+            let alpha = min(1, age * 2, (DesktopVisit.duration - age) * 2)
+            context.saveGState()
+            context.setAlpha(alpha)
+            context.setFillColor(NSColor(srgbRed: 0.12, green: 0.25, blue: 0.27, alpha: 0.92).cgColor)
+            context.fillEllipse(in: CGRect(x: x - 20, y: y - 20, width: 40, height: 40))
+            if let image = NSImage(systemSymbolName: visitor.symbol, accessibilityDescription: visitor.title) {
+                image.draw(in: CGRect(x: x - 12, y: y - 12, width: 24, height: 24), from: .zero,
+                           operation: .sourceOver, fraction: alpha)
+            }
+            context.restoreGState()
+            // These visits add ephemeral artwork; they never alter saved decorations.
+            if visitor == .elves && age > 2.2 {
+                DesktopDecoration.draw([.snowman],
+                    layouts: [.snowman: DecorationLayout(x: min(0.93, max(0.07, progress)), y: 0.08)],
+                    in: context, bounds: bounds)
+            } else if visitor == .fight && !style.reduceMotion {
+                drawSparks(in: context, at: CGPoint(x: x, y: y + 20), age: age.truncatingRemainder(dividingBy: 0.5))
+            }
+            return
+        }
+
+        let origin = CGPoint(x: bounds.width * 0.17, y: 42)
+        let vx = min(bounds.width * 0.64, 650)
+        let vy: CGFloat = 275
+        let gravity: CGFloat = 650
+        let impact = DesktopVisit.snowballImpact(origin: origin, vx: vx, vy: vy, gravity: gravity, edges: edges)
+            ?? (2 * vy / gravity)
+        let t = min(age, impact)
+        let point = CGPoint(x: origin.x + vx * t, y: origin.y + vy * t - gravity * t * t / 2)
+        if age < impact, !style.reduceMotion {
+            context.setFillColor(gray: 1, alpha: 0.9)
+            context.fillEllipse(in: CGRect(x: point.x - 7, y: point.y - 7, width: 14, height: 14))
+        } else if age >= impact {
+            drawSparks(in: context, at: point, age: age - impact)
         }
     }
 

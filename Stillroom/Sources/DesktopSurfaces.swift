@@ -58,10 +58,13 @@ enum DesktopProp: String, CaseIterable, Codable, Identifiable {
 
 @MainActor
 enum DesktopDecoration {
-    static func draw(_ props: Set<DesktopProp>, in context: CGContext, bounds: CGRect) {
+    static func draw(_ props: Set<DesktopProp>, layouts: [DesktopProp: DecorationLayout],
+                     in context: CGContext, bounds: CGRect) {
         if props.contains(.snowman) {
             context.saveGState()
-            context.translateBy(x: bounds.width * 0.14, y: 14)
+            let layout = layouts[.snowman] ?? .initial(.snowman)
+            context.translateBy(x: bounds.width * layout.x, y: bounds.height * layout.y)
+            context.rotate(by: layout.angle * .pi / 180)
             context.setFillColor(NSColor(srgbRed: 0.89, green: 0.96, blue: 0.98, alpha: 0.95).cgColor)
             let snowballs: [(CGFloat, CGFloat)] = [(0, 28), (36, 22), (67, 16)]
             for (y, radius) in snowballs {
@@ -77,7 +80,9 @@ enum DesktopDecoration {
         }
         if props.contains(.tree) {
             context.saveGState()
-            context.translateBy(x: bounds.width * 0.84, y: 14)
+            let layout = layouts[.tree] ?? .initial(.tree)
+            context.translateBy(x: bounds.width * layout.x, y: bounds.height * layout.y)
+            context.rotate(by: layout.angle * .pi / 180)
             context.setFillColor(NSColor(srgbRed: 0.49, green: 0.34, blue: 0.25, alpha: 1).cgColor)
             context.fill(CGRect(x: -6, y: 0, width: 12, height: 25))
             for tier in 0..<3 {
@@ -91,9 +96,11 @@ enum DesktopDecoration {
                 context.closePath()
                 context.fillPath()
             }
-            context.setFillColor(NSColor(srgbRed: 1, green: 0.79, blue: 0.32, alpha: 1).cgColor)
-            for origin in [CGPoint(x: -19, y: 28), CGPoint(x: 13, y: 43), CGPoint(x: -5, y: 64)] {
-                context.fillEllipse(in: CGRect(origin: origin, size: CGSize(width: 4, height: 4)))
+            if layout.lights {
+                context.setFillColor(NSColor(srgbRed: 1, green: 0.79, blue: 0.32, alpha: 1).cgColor)
+                for origin in [CGPoint(x: -19, y: 28), CGPoint(x: 13, y: 43), CGPoint(x: -5, y: 64)] {
+                    context.fillEllipse(in: CGRect(origin: origin, size: CGSize(width: 4, height: 4)))
+                }
             }
             context.restoreGState()
         }
