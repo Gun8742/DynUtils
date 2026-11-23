@@ -122,6 +122,7 @@ private final class ParticleView: NSView {
     private var edges: [DesktopEdge] = []
     private var foregroundWindows: [Int: [CGRect]] = [:]
     private var coveredLedges: [Int: [ClosedRange<CGFloat>]] = [:]
+    private var snowWalls: [DesktopSnowWall] = []
     private var snow = SnowSimulation()
     private var craft = SnowCraft()
     private var snowman: SnowmanPhysics?
@@ -139,6 +140,7 @@ private final class ParticleView: NSView {
                 edges = []
                 foregroundWindows = [:]
                 coveredLedges = [:]
+                snowWalls = []
                 snow = SnowSimulation()
                 craft = SnowCraft()
                 lastSnowmanMovement = 0
@@ -205,6 +207,7 @@ private final class ParticleView: NSView {
             edges = snapshot.edges
             foregroundWindows = snapshot.foreground
             coveredLedges = snapshot.coveredLedges
+            snowWalls = snapshot.snowWalls
             nextEdgeSample = tracksSnowSurfaces && now < followWindowsUntil ? now : now + 0.06
         }
 
@@ -217,7 +220,8 @@ private final class ParticleView: NSView {
             let pointer = bounds.insetBy(dx: -25, dy: -25).contains(cursor) ? cursor : nil
 
             let ledges = style.surfaceSnow ? edges : []
-            snow.sync(width: bounds.width, ground: style.groundSnow, ledges: ledges, coveredLedges: coveredLedges)
+            snow.sync(width: bounds.width, ground: style.groundSnow, ledges: ledges, coveredLedges: coveredLedges,
+                      walls: style.surfaceSnow ? snowWalls : [])
             let pressing = style.snowCrafting && NSEvent.pressedMouseButtons & 1 != 0
             let crafted = style.snowCrafting
                 ? snow.updateCraft(&craft, size: bounds.size,

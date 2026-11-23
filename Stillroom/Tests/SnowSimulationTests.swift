@@ -24,7 +24,9 @@ struct SnowSimulationTests {
         foregroundWindowsCoverOnlyTheirOverlaps()
         snowPersistsAcrossABriefWindowTransition()
         resizingPreservesSnowMass()
-        print("Passed 18 snow, crafting, and decoration regression checks")
+        snowSlidesDownWallAndAccumulatesBelow()
+        wallCollisionsRespectVisibilityAndBothSides()
+        print("Passed 20 snow, crafting, and decoration regression checks")
     }
 
     private static func localizedImpactAndMovingLedge() {
@@ -366,6 +368,58 @@ struct SnowSimulationTests {
         bank.move(to: DesktopEdge(minX: -20, maxX: 106, y: 120, id: 1))
         precondition(abs(bank.depths.reduce(0, +) * bank.spacing - 56) < 0.001)
         precondition(bank.depths.filter { $0 > 0 }.count > 1)
+    }
+
+    private static func snowSlidesDownWallAndAccumulatesBelow() {
+        let frame = CGRect(origin: .zero, size: size)
+        let topWindow = DesktopWindowSnapshot.Surface(id: 1, bounds: CGRect(x: 65, y: 44, width: 95, height: 96))
+        let lowerWindow = DesktopWindowSnapshot.Surface(id: 2, bounds: CGRect(x: 20, y: 3, width: 120, height: 25))
+        let snapshot = DesktopWindowSnapshot(frame: frame, surfaces: [topWindow, lowerWindow])
+        var snow = SnowSimulation()
+        snow.sync(width: size.width, ground: true, ledges: snapshot.edges,
+                  coveredLedges: snapshot.coveredLedges, walls: snapshot.snowWalls)
+        var flake = SnowSimulation.Flake(position: CGPoint(x: 42, y: 100), velocity: CGVector(dx: 75, dy: -65),
+                                         radius: 2, phase: 0)
+        precondition(!snow.moveFlake(&flake, dt: 0.35, mass: 32))
+        precondition(flake.wall?.windowID == 1 && flake.wall?.leftSide == true)
+        precondition(flake.position.x == 63 && flake.velocity.dx == 0 && abs(flake.velocity.dy) < 65)
+        let impacted = flake.position
+        precondition(!snow.moveFlake(&flake, dt: 1.0 / 30, mass: 32))
+        precondition(flake.position.x == impacted.x && flake.position.y < impacted.y)
+
+        let moved = DesktopWindowSnapshot.Surface(id: 1, bounds: topWindow.bounds.offsetBy(dx: 12, dy: 0))
+        let updated = DesktopWindowSnapshot(frame: frame, surfaces: [moved, lowerWindow])
+        snow.sync(width: size.width, ground: true, ledges: updated.edges,
+                  coveredLedges: updated.coveredLedges, walls: updated.snowWalls)
+        precondition(!snow.moveFlake(&flake, dt: 1.0 / 30, mass: 32))
+        precondition(flake.position.x == 75)
+        var landed = false
+        for _ in 0..<80 where !landed {
+            landed = snow.moveFlake(&flake, dt: 1.0 / 30, mass: 32)
+        }
+        precondition(landed)
+        precondition(snow.banks[1].depth(at: 75) > 0 && snow.banks[0].depths.allSatisfy { $0 == 0 })
+        precondition(snow.banks[2].depths.allSatisfy { $0 == 0 })
+    }
+
+    private static func wallCollisionsRespectVisibilityAndBothSides() {
+        let frame = CGRect(origin: .zero, size: size)
+        let foreground = DesktopWindowSnapshot.Surface(id: 1, bounds: CGRect(x: 42, y: 74, width: 44, height: 41))
+        let background = DesktopWindowSnapshot.Surface(id: 2, bounds: CGRect(x: 66, y: 40, width: 80, height: 115))
+        let snapshot = DesktopWindowSnapshot(frame: frame, surfaces: [foreground, background])
+        var snow = SnowSimulation()
+        snow.sync(width: size.width, ground: false, ledges: snapshot.edges, walls: snapshot.snowWalls)
+        var hidden = SnowSimulation.Flake(position: CGPoint(x: 59, y: 94), velocity: CGVector(dx: 68, dy: -20),
+                                          radius: 2, phase: 0)
+        precondition(!snow.moveFlake(&hidden, dt: 0.2, mass: 5) && hidden.wall == nil)
+        var fromRight = SnowSimulation.Flake(position: CGPoint(x: 154, y: 104), velocity: CGVector(dx: -68, dy: -20),
+                                             radius: 2, phase: 0)
+        precondition(!snow.moveFlake(&fromRight, dt: 0.2, mass: 5))
+        precondition(fromRight.wall?.windowID == 2 && fromRight.wall?.leftSide == false && fromRight.position.x == 148)
+        var fromAbove = SnowSimulation.Flake(position: CGPoint(x: 115, y: 166), velocity: CGVector(dx: 4, dy: -40),
+                                             radius: 2, phase: 0)
+        precondition(snow.moveFlake(&fromAbove, dt: 0.4, mass: 5) && fromAbove.wall == nil)
+        precondition(snow.banks[1].depth(at: 116) > 0)
     }
 
     private static func step(_ snow: inout SnowSimulation, wind: CGFloat = 0, pointer: CGPoint? = nil) {

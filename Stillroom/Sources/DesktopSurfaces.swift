@@ -26,6 +26,16 @@ struct DesktopEdge: Equatable {
 
 }
 
+struct DesktopSnowWall {
+    let windowID: Int
+    let bounds: CGRect
+    let foreground: [CGRect]
+
+    func covered(at point: CGPoint) -> Bool {
+        foreground.contains { $0.contains(point) }
+    }
+}
+
 struct DesktopWindowSnapshot {
     struct Surface {
         let id: Int
@@ -35,6 +45,7 @@ struct DesktopWindowSnapshot {
 
     let edges: [DesktopEdge]
     let foreground: [Int: [CGRect]]
+    let snowWalls: [DesktopSnowWall]
 
     init(frame: CGRect, surfaces: [Surface]) {
         let visible = surfaces.filter { surface in
@@ -47,21 +58,27 @@ struct DesktopWindowSnapshot {
         }.prefix(48)
         var edges: [DesktopEdge] = []
         var foreground: [Int: [CGRect]] = [:]
+        var snowWalls: [DesktopSnowWall] = []
         var earlier: [CGRect] = []
 
         // The window list is ordered from front to back. Keep full ledge coordinates for each bank.
         for surface in visible {
             let local = surface.bounds.offsetBy(dx: -frame.minX, dy: -frame.minY)
+            let overlapping = earlier.filter { $0.maxX >= local.minX && $0.minX <= local.maxX }
+            if snowWalls.count < 24 {
+                snowWalls.append(DesktopSnowWall(windowID: surface.id, bounds: local, foreground: overlapping))
+            }
             if edges.count < 24, local.maxY > 0, local.maxY < frame.height {
                 edges.append(DesktopEdge(minX: local.minX, maxX: local.maxX, y: local.maxY,
                                          id: surface.id, isDock: surface.isDock))
-                foreground[surface.id] = earlier.filter { $0.maxX > local.minX && $0.minX < local.maxX }
+                foreground[surface.id] = overlapping
             }
             earlier.append(local)
         }
         foreground[-1] = earlier
         self.edges = edges
         self.foreground = foreground
+        self.snowWalls = snowWalls
     }
 
     var coveredLedges: [Int: [ClosedRange<CGFloat>]] {

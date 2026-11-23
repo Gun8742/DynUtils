@@ -171,12 +171,22 @@ struct SnowBank {
 }
 
 struct SnowSimulation {
+    struct WallContact {
+        let windowID: Int
+        let leftSide: Bool
+
+        func x(in bounds: CGRect, radius: CGFloat) -> CGFloat {
+            leftSide ? bounds.minX - radius : bounds.maxX + radius
+        }
+    }
+
     struct Flake {
         var position: CGPoint
         var velocity: CGVector
         let radius: CGFloat
         let phase: CGFloat
         var mass: CGFloat = 0
+        var wall: WallContact?
     }
 
     private(set) var banks: [SnowBank] = []
@@ -185,12 +195,14 @@ struct SnowSimulation {
     private var spill: [Int: CGVector] = [:]
     private var detached: [Int: (bank: SnowBank, expires: CGFloat)] = [:]
     private var coveredLedges: [Int: [ClosedRange<CGFloat>]] = [:]
+    private var walls: [DesktopSnowWall] = []
     private var previousPointer: CGPoint?
     private var time: CGFloat = 0
 
     mutating func sync(width: CGFloat, ground: Bool, ledges: [DesktopEdge],
-                       coveredLedges: [Int: [ClosedRange<CGFloat>]] = [:]) {
+                       coveredLedges: [Int: [ClosedRange<CGFloat>]] = [:], walls: [DesktopSnowWall] = []) {
         self.coveredLedges = coveredLedges
+        self.walls = walls
         for id in detached.keys.filter({ (detached[$0]?.expires ?? 0) <= time }) {
             detached.removeValue(forKey: id)
             spill.removeValue(forKey: id)
@@ -286,29 +298,28 @@ struct SnowSimulation {
             var flake = flakes[index]
             let targetX = wind * 83 + sin(time * 1.9 + flake.phase) * 23
             let terminal = (heavy ? 113.0 : 78.0) * (0.66 + flake.radius * 0.19)
-            flake.velocity.dx += (targetX - flake.velocity.dx) * min(1, dt * 1.8)
-            flake.velocity.dy = max(-terminal, flake.velocity.dy - 140 * dt)
-            let next = moved(flake, dt: dt)
-            if deposit(from: flake.position, to: next, mass: flake.radius * (heavy ? 2.6 : 2.1))
-                || next.y < -9 || next.x < -120 || next.x > size.width + 120 {
+            if flake.wall == nil {
+                flake.velocity.dx += (targetX - flake.velocity.dx) * min(1, dt * 1.8)
+                flake.velocity.dy = max(-terminal, flake.velocity.dy - 140 * dt)
+            }
+            if moveFlake(&flake, dt: dt, mass: flake.radius * (heavy ? 2.6 : 2.1))
+                || flake.position.y < -9 || flake.position.x < -120 || flake.position.x > size.width + 120 {
                 flake = newFlake(in: size, heavy: heavy, spread: false)
-            } else {
-                flake.position = next
             }
             flakes[index] = flake
         }
 
         for index in clumps.indices.reversed() {
             var clump = clumps[index]
-            clump.velocity.dy -= 265 * dt
-            clump.velocity.dx += (wind * 68 - clump.velocity.dx) * min(1, dt * 0.77)
-            let next = moved(clump, dt: dt)
-            if deposit(from: clump.position, to: next, mass: clump.mass)
-                || next.y < -12 || next.x < -120 || next.x > size.width + 120 {
+            if clump.wall == nil {
+                clump.velocity.dy -= 265 * dt
+                clump.velocity.dx += (wind * 68 - clump.velocity.dx) * min(1, dt * 0.77)
+            }
+            if moveFlake(&clump, dt: dt, mass: clump.mass)
+                || clump.position.y < -12 || clump.position.x < -120 || clump.position.x > size.width + 120 {
                 clumps.swapAt(index, clumps.count - 1)
                 clumps.removeLast()
             } else {
-                clump.position = next
                 clumps[index] = clump
             }
         }
@@ -340,8 +351,58 @@ struct SnowSimulation {
         return true
     }
 
-    private func moved(_ flake: Flake, dt: CGFloat) -> CGPoint {
-        CGPoint(x: flake.position.x + flake.velocity.dx * dt, y: flake.position.y + flake.velocity.dy * dt)
+    mutating func moveFlake(_ flake: inout Flake, dt: CGFloat, mass: CGFloat) -> Bool {
+        var start = flake.position
+        if let contact = flake.wall {
+            flake.wall = nil
+            if let wall = walls.first(where: { $0.windowID == contact.windowID }) {
+                let side = contact.x(in: wall.bounds, radius: flake.radius)
+                let point = CGPoint(x: side, y: start.y)
+                if (wall.bounds.minY...wall.bounds.maxY).contains(start.y), !wall.covered(at: point) {
+                    start = point
+                    flake.velocity.dy = -43 + (flake.velocity.dy + 43) * exp(-7 * dt)
+                    let end = CGPoint(x: side, y: start.y + flake.velocity.dy * dt)
+                    if end.y >= wall.bounds.minY, !wall.covered(at: end) {
+                        flake.wall = contact
+                    }
+                    flake.position = end
+                    return deposit(from: start, to: end, mass: mass)
+                }
+            }
+        }
+
+        let end = CGPoint(x: start.x + flake.velocity.dx * dt, y: start.y + flake.velocity.dy * dt)
+        if let collision = firstWall(from: start, to: end, radius: flake.radius) {
+            if deposit(from: start, to: collision.point, mass: mass) { return true }
+            flake.wall = collision.contact
+            flake.position = collision.point
+            flake.velocity = CGVector(dx: 0, dy: -min(46, max(18, abs(flake.velocity.dy) * 0.46)))
+            return false
+        }
+
+        flake.position = end
+        return deposit(from: start, to: end, mass: mass)
+    }
+
+    private func firstWall(from start: CGPoint, to end: CGPoint, radius: CGFloat)
+        -> (contact: WallContact, point: CGPoint)? {
+        let dx = end.x - start.x
+        guard dx != 0 else { return nil }
+        var earliest: CGFloat = 2
+        var impact: (contact: WallContact, point: CGPoint)?
+        for wall in walls {
+            let contact = WallContact(windowID: wall.windowID, leftSide: dx > 0)
+            let x = contact.x(in: wall.bounds, radius: radius)
+            let time = (x - start.x) / dx
+            guard time >= 0, time <= 1, time < earliest else { continue }
+            let y = start.y + (end.y - start.y) * time
+            guard y > wall.bounds.minY, y < wall.bounds.maxY else { continue }
+            let point = CGPoint(x: x, y: y)
+            guard !wall.covered(at: point) else { continue }
+            earliest = time
+            impact = (contact, point)
+        }
+        return impact
     }
 
     private func newFlake(in size: CGSize, heavy: Bool, spread: Bool) -> Flake {
