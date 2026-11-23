@@ -264,7 +264,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
             overlays.removeValue(forKey: key)?.close()
         }
         let style = WeatherOverlay.Style(
-            effect: effect, wind: prefs.wind,
+            effect: effect, density: prefs.density, wind: prefs.wind,
             reduceMotion: prefs.reduceMotion || workspace.accessibilityDisplayShouldReduceMotion,
             lowPower: battery || ProcessInfo.processInfo.isLowPowerModeEnabled,
             rainbow: prefs.rainbow, lightning: prefs.lightning

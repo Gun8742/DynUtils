@@ -1,10 +1,24 @@
 import Foundation
 
 enum Effect: String, CaseIterable, Codable, Identifiable {
-    case off, snow, heavySnow, rain, leaves, sakura, fireflies, starfall
+    case off, snow, heavySnow, drizzle, rain, mist, leaves, sakura, fireflies, starfall
     var id: String { rawValue }
     var title: String {
         self == .heavySnow ? "Heavy Snow" : rawValue.capitalized
+    }
+}
+
+enum EffectDensity: String, CaseIterable, Codable, Identifiable {
+    case light, balanced, full
+
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var multiplier: Double {
+        switch self {
+        case .light: 0.55
+        case .balanced: 1
+        case .full: 1.65
+        }
     }
 }
 
@@ -28,9 +42,9 @@ struct Wallpaper: Identifiable {
 
     static let catalog = [
         Self(id: "salt-marsh", title: "Salt Marsh",
-             effects: [.snow, .heavySnow, .fireflies, .starfall], resource: "Salt-Marsh"),
+             effects: [.snow, .heavySnow, .mist, .fireflies, .starfall], resource: "Salt-Marsh"),
         Self(id: "amber-ridge", title: "Amber Ridge",
-             effects: [.rain, .leaves, .sakura], resource: "Amber-Ridge")
+             effects: [.drizzle, .rain, .leaves, .sakura], resource: "Amber-Ridge")
     ]
 
     func url(for resolution: Resolution, aspectRatio: Double) -> URL? {
@@ -47,6 +61,12 @@ struct Preferences: Codable {
     var manualPause = false
     var pauseOnBattery = false
     var reduceMotion = false
+    // Optional storage lets existing v1 preferences decode without a density key.
+    private var effectDensity: EffectDensity?
+    var density: EffectDensity {
+        get { effectDensity ?? .balanced }
+        set { effectDensity = newValue }
+    }
     var wind = 0.0
     var rainbow = false
     var lightning = false

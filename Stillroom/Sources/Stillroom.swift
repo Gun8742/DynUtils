@@ -228,6 +228,12 @@ private struct Studio: View {
             Picker("Weather", selection: Binding(get: { session.prefs.effect }, set: { session.selectEffect($0) })) {
                 ForEach(Effect.allCases) { Text($0.title).tag($0) }
             }.fixedSize()
+            Picker("Density", selection: $session.prefs.density) {
+                ForEach(EffectDensity.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Effect density")
+            .disabled(session.prefs.effect == .off)
             HStack {
                 Text("Wind")
                 Slider(value: $session.prefs.wind, in: -1...1) { Text("Wind") }
