@@ -1,5 +1,4 @@
 "Language" = "ภาษา";
-"System language" = "ตามระบบ";
 "Wallpapers" = "ภาพพื้นหลัง";
 "Effects" = "เอฟเฟกต์";
 "Settings" = "การตั้งค่า";
@@ -48,7 +47,8 @@
 "Starfall" = "ดาวตก";
 "Accumulate snow at the bottom" = "สะสมหิมะที่ขอบล่าง";
 "Accumulate snow on windows and Dock" = "สะสมหิมะบนหน้าต่างและ Dock";
-"Deeper snow" = "เพิ่มความหนาของหิมะ";
+"Desktop snow depth limit" = "ความหนาสูงสุดของหิมะบนเดสก์ท็อป";
+"Window and Dock snow depth limit" = "ความหนาสูงสุดของหิมะบนหน้าต่างและ Dock";
 "Rainbow" = "สายรุ้ง";
 "Lightning" = "ฟ้าแลบ";
 "Pause weather" = "พักเอฟเฟกต์";
@@ -107,3 +107,8 @@
 "Normal" = "ปกติ";
 "Auto" = "อัตโนมัติ";
 "Ultrawide" = "กว้างพิเศษ";
+
+"Craft snowballs" = "ปั้นลูกหิมะ";
+"Drag through snow to make a ball. Nudge it with the pointer to roll it. Stack three to build a snowman. Clicks still reach the app below." = "กดเมาส์ค้างแล้วลากผ่านกองหิมะเพื่อปั้นลูก ใช้ตัวชี้ดันลูกให้กลิ้ง วางซ้อนกันสามลูกเพื่อสร้างตุ๊กตาหิมะ การคลิกยังส่งไปยังแอปด้านล่าง";
+
+"Remove decoration" = "ลบของตกแต่ง";

@@ -36,13 +36,55 @@ struct DesktopVisit: Equatable {
     }
 }
 
+struct SnowmanSnowballs: Codable, Equatable {
+    let base: CGFloat
+    let torso: CGFloat
+    let head: CGFloat
+
+    var totalMass: CGFloat { base + torso + head }
+
+    static let legacyParts = [
+        CGRect(x: -25, y: 2, width: 50, height: 40),
+        CGRect(x: -19, y: 29, width: 39, height: 38),
+        CGRect(x: -15, y: 57, width: 33, height: 33)
+    ]
+
+    var parts: [CGRect] {
+        var height: CGFloat = 0
+        return [base, torso, head].map { mass in
+            let radius = SnowCraft.radius(for: mass)
+            let rect = CGRect(x: -radius, y: height, width: radius * 2, height: radius * 2)
+            height += radius * 1.77
+            return rect
+        }
+    }
+}
+
 struct DecorationLayout: Codable, Equatable {
     var x: CGFloat
     var y: CGFloat
     var angle: CGFloat = 0
     var lights = true
+    var snowballs: SnowmanSnowballs?
 
     static func initial(_ prop: DesktopProp) -> Self {
-        Self(x: prop == .snowman ? 0.14 : 0.84, y: 0.015)
+        prop == .snowman ? Self(x: 0.14, y: 0.015) : Self(x: 0.84, y: 0)
+    }
+}
+
+extension DecorationLayout {
+    static let treeTrunk = CGRect(x: -5, y: 0, width: 11, height: 24)
+    static let maxTreeLean: CGFloat = 30
+
+    var treeLean: CGFloat {
+        let angle = angle.truncatingRemainder(dividingBy: 360)
+        let signed = angle > 180 ? angle - 360 : (angle < -180 ? angle + 360 : angle)
+        return min(Self.maxTreeLean, max(-Self.maxTreeLean, signed))
+    }
+
+    func groundedTree(in bounds: CGRect, floor: CGFloat) -> (origin: CGPoint, radians: CGFloat) {
+        let radians = treeLean * .pi / 180
+        let trunk = Self.treeTrunk.applying(CGAffineTransform(rotationAngle: radians))
+        return (CGPoint(x: bounds.minX + bounds.width * x, y: floor - trunk.minY), radians)
     }
 }

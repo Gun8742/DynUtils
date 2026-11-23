@@ -45,8 +45,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     @Published private(set) var canUndoDecoration = false
     private var decorationUndo: (display: String, props: Set<DesktopProp>, layouts: [DesktopProp: DecorationLayout])?
     var interfaceLocale: Locale {
-        guard let language = prefs.interfaceLanguage, language != "system" else { return .autoupdatingCurrent }
-        return Locale(identifier: language)
+        Locale(identifier: prefs.language.rawValue)
     }
     private var desktopVisits: [String: DesktopVisit] = [:]
     private var nextAutomaticVisit = Date().addingTimeInterval(120)
@@ -245,17 +244,20 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
     }
 
     func setDecoration(_ prop: DesktopProp, on display: String, enabled: Bool) {
+        guard !enabled || prop == .tree else { return }
         var saved = prefs.desktopProps ?? [:]
         var props = saved[display] ?? []
+        guard props.contains(prop) != enabled else { return }
         rememberDecorations(on: display)
-        canUndoDecoration = true
+        var updated = prefs
         if enabled { props.insert(prop) }
         else {
             props.remove(prop)
-            prefs.decorationLayouts?[display]?[prop] = nil
+            updated.decorationLayouts?[display]?[prop] = nil
         }
         saved[display] = props.isEmpty ? nil : props
-        prefs.desktopProps = saved
+        updated.desktopProps = saved
+        prefs = updated
     }
 
     func undoDecoration() {
@@ -285,6 +287,29 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         var layouts = prefs.decorationLayouts ?? [:]
         layouts[display, default: [:]][prop] = layout
         prefs.decorationLayouts = layouts
+    }
+
+    private func updateSnowman(_ update: WeatherOverlay.SnowmanUpdate, on display: String) {
+        let layout: DecorationLayout
+        switch update {
+        case .crafted(let crafted):
+            rememberDecorations(on: display)
+            layout = crafted
+        case .rested(let rest):
+            guard decoration(.snowman, on: display) else { return }
+            layout = rest
+        case .shattered:
+            setDecoration(.snowman, on: display, enabled: false)
+            return
+        }
+        var updated = prefs
+        var placements = updated.desktopProps ?? [:]
+        var layouts = updated.decorationLayouts ?? [:]
+        placements[display, default: []].insert(.snowman)
+        layouts[display, default: [:]][.snowman] = layout
+        updated.desktopProps = placements
+        updated.decorationLayouts = layouts
+        prefs = updated
     }
 
     func setAutomaticVisitor(_ visitor: DesktopVisitor, enabled: Bool) {
@@ -463,7 +488,11 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
         let weatherScreens = causes.isEmpty && effect != .off
             ? NSScreen.screens.filter { !prefs.weatherDisabled.contains($0.displayKey) } : []
         let weatherIDs = Set(weatherScreens.map(\.displayKey))
-        let screens = NSScreen.screens.filter { weatherIDs.contains($0.displayKey) || placements[$0.displayKey]?.isEmpty == false || desktopVisits[$0.displayKey] != nil }
+        let screens = NSScreen.screens.filter {
+            let id = $0.displayKey
+            return weatherIDs.contains(id) || placements[id]?.isEmpty == false || desktopVisits[id] != nil
+                || overlays[id]?.hasDeposits == true
+        }
         let active = Set(screens.map(\.displayKey))
         for key in overlays.keys.filter({ !active.contains($0) }) {
             overlays.removeValue(forKey: key)?.close()
@@ -476,12 +505,20 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
                 effect: weatherIDs.contains(id) ? effect : .off, density: prefs.density, wind: prefs.wind,
                 reduceMotion: reduced, lowPower: lowPower, rainbow: prefs.rainbow,
                 lightning: prefs.lightning, groundSnow: prefs.groundSnow == true,
-                surfaceSnow: prefs.surfaceSnow == true, deeperSnow: prefs.deeperSnow == true,
+                surfaceSnow: prefs.surfaceSnow == true,
+                snowDepth: SnowDepthLimits(ground: prefs.groundSnowDepth, surfaces: prefs.surfaceSnowDepth),
+                snowmanPhysics: guideEffect == nil,
+                snowCrafting: guideEffect == nil && prefs.snowCrafting == true
+                    && (prefs.groundSnow == true || prefs.surfaceSnow == true),
                 props: placements[id] ?? [], layouts: prefs.decorationLayouts?[id] ?? [:],
                 visit: desktopVisits[id], aboveWindows: prefs.effectsAboveWindows == true
             )
             if let overlay = overlays[id] { overlay.update(screen: screen, style: style) }
-            else { overlays[id] = WeatherOverlay(screen: screen, style: style) }
+            else {
+                overlays[id] = WeatherOverlay(screen: screen, style: style) { [weak self] update in
+                    self?.updateSnowman(update, on: id)
+                }
+            }
         }
         if effect == .off { weatherStatus = "Off" }
         else if !causes.isEmpty { weatherStatus = "Paused: " + causes.joined(separator: ", ") }

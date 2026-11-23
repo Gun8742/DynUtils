@@ -277,10 +277,19 @@ private struct Studio: View {
                     get: { session.prefs.surfaceSnow == true },
                     set: { session.prefs.surfaceSnow = $0 }
                 ))
-                Toggle("Deeper snow", isOn: Binding(
-                    get: { session.prefs.deeperSnow == true },
-                    set: { session.prefs.deeperSnow = $0 }
+                snowDepthSlider("Desktop snow depth limit", value: $session.prefs.groundSnowDepth)
+                    .disabled(session.prefs.groundSnow != true)
+                snowDepthSlider("Window and Dock snow depth limit", value: $session.prefs.surfaceSnowDepth)
+                    .disabled(session.prefs.surfaceSnow != true)
+                Toggle("Craft snowballs", isOn: Binding(
+                    get: { session.prefs.snowCrafting == true },
+                    set: { session.prefs.snowCrafting = $0 }
                 ))
+                .disabled(session.prefs.groundSnow != true && session.prefs.surfaceSnow != true)
+                if session.prefs.snowCrafting == true {
+                    Text("Drag through snow to make a ball. Nudge it with the pointer to roll it. Stack three to build a snowman. Clicks still reach the app below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             if session.prefs.effect == .rain {
                 Toggle("Rainbow", isOn: $session.prefs.rainbow)
@@ -292,6 +301,14 @@ private struct Studio: View {
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
             .disabled(session.prefs.effect == .off)
+        }
+    }
+
+    private func snowDepthSlider(_ title: LocalizedStringKey, value: Binding<Double>) -> some View {
+        HStack {
+            Slider(value: value, in: SnowDepthLimits.range, step: 1) { Text(title) }
+                .accessibilityValue(Text("\(Int(value.wrappedValue)) pt"))
+            Text("\(Int(value.wrappedValue)) pt").monospacedDigit()
         }
     }
 
@@ -310,13 +327,9 @@ private struct Studio: View {
             }
             Divider()
             Text("Power & motion").font(.headline)
-            Picker("Language", selection: Binding(
-                get: { session.prefs.interfaceLanguage ?? "system" },
-                set: { session.prefs.interfaceLanguage = $0 }
-            )) {
-                Text("System language").tag("system")
-                Text("English").tag("en")
-                Text("ไทย").tag("th")
+            Picker("Language", selection: $session.prefs.language) {
+                Text(verbatim: "English").tag(InterfaceLanguage.english)
+                Text(verbatim: "ไทย").tag(InterfaceLanguage.thai)
             }.fixedSize()
             Toggle("Show effects above windows", isOn: Binding(
                 get: { session.prefs.effectsAboveWindows == true },
@@ -343,12 +356,10 @@ private struct Studio: View {
                 )) {
                     ForEach(session.displays) { Text($0.name).tag($0.id) }
                 }.fixedSize()
-                ForEach(DesktopProp.allCases) { prop in
-                    Toggle(LocalizedStringKey(prop.title), isOn: Binding(
-                        get: { session.decoration(prop, on: display.id) },
-                        set: { session.setDecoration(prop, on: display.id, enabled: $0) }
-                    ))
-                }
+                Toggle("Tree", isOn: Binding(
+                    get: { session.decoration(.tree, on: display.id) },
+                    set: { session.setDecoration(.tree, on: display.id, enabled: $0) }
+                ))
                 DecorationEditor(session: session, display: display.id)
                 Button("Throw snowball") { session.throwSnowball(on: display.id) }
                 Button("Undo decoration change") { session.undoDecoration() }

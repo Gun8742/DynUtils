@@ -62,6 +62,22 @@ struct Wallpaper: Identifiable {
     }
 }
 
+enum InterfaceLanguage: String {
+    case english = "en"
+    case thai = "th"
+}
+
+struct SnowDepthLimits: Equatable {
+    static let range: ClosedRange<Double> = 3...64
+    static let standard = Self(ground: 17, surfaces: 12)
+    var ground: Double
+    var surfaces: Double
+
+    static func clamped(_ depth: Double) -> Double {
+        min(range.upperBound, max(range.lowerBound, depth))
+    }
+}
+
 struct Preferences: Codable {
     var onboardingComplete = false
     var effect: Effect = .off
@@ -77,7 +93,18 @@ struct Preferences: Codable {
     }
     var groundSnow: Bool?
     var surfaceSnow: Bool?
-    var deeperSnow: Bool?
+    private var deeperSnow: Bool?
+    private var groundDepthLimit: Double?
+    private var surfaceDepthLimit: Double?
+    var groundSnowDepth: Double {
+        get { SnowDepthLimits.clamped(groundDepthLimit ?? (deeperSnow == true ? 30 : SnowDepthLimits.standard.ground)) }
+        set { groundDepthLimit = SnowDepthLimits.clamped(newValue) }
+    }
+    var surfaceSnowDepth: Double {
+        get { SnowDepthLimits.clamped(surfaceDepthLimit ?? (deeperSnow == true ? 22 : SnowDepthLimits.standard.surfaces)) }
+        set { surfaceDepthLimit = SnowDepthLimits.clamped(newValue) }
+    }
+    var snowCrafting: Bool?
     var southernHemisphere: Bool?
     var randomHours: Int?
     var lastRandomSlot: Int?
@@ -90,7 +117,11 @@ struct Preferences: Codable {
     var decorationLayouts: [String: [DesktopProp: DecorationLayout]]?
     var automaticVisitors: Set<DesktopVisitor>?
     var routeVisitorsAcrossDisplays: Bool?
-    var interfaceLanguage: String?
+    private var interfaceLanguage: String?
+    var language: InterfaceLanguage {
+        get { interfaceLanguage.flatMap(InterfaceLanguage.init(rawValue:)) ?? .english }
+        set { interfaceLanguage = newValue.rawValue }
+    }
     var effectsAboveWindows: Bool?
     var wind = 0.0
     var rainbow = false
