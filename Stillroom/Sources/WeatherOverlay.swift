@@ -26,6 +26,9 @@ final class WeatherOverlay: NSObject {
         var layouts: [DesktopProp: DecorationLayout]
         var visit: DesktopVisit?
         var aboveWindows: Bool
+
+        var frameInterval: TimeInterval { 1.0 / (lowPower || reduceMotion ? 15 : 30) }
+        var particleDivisor: Int { reduceMotion ? 3 : (lowPower ? 2 : 1) }
     }
 
     private let window: NSWindow
@@ -53,8 +56,7 @@ final class WeatherOverlay: NSObject {
             self, selector: #selector(visibilityChanged),
             name: NSWindow.didChangeOcclusionStateNotification, object: window
         )
-        window.orderFrontRegardless()
-        visibilityChanged()
+        refreshPresentation()
     }
 
     func update(screen: NSScreen, style: Style) {
@@ -64,6 +66,17 @@ final class WeatherOverlay: NSObject {
         }
         renderer.treeFloor = max(0, screen.visibleFrame.minY - screen.frame.minY)
         renderer.style = style
+        refreshPresentation()
+    }
+
+    private func refreshPresentation() {
+        let style = renderer.style
+        let hasVisibleContent = style.effect != .off || !style.props.isEmpty || style.visit?.expired == false
+        if hasVisibleContent, !window.isVisible {
+            window.orderFrontRegardless()
+        } else if !hasVisibleContent, window.isVisible {
+            window.orderOut(nil)
+        }
         visibilityChanged()
     }
 
@@ -115,6 +128,41 @@ private final class ParticleView: NSView {
             NSColor(srgbRed: 0.96, green: 0.98, blue: 1, alpha: 0.92).cgColor
         ] as CFArray, locations: [0, 0.55, 1]
     )
+    private static let snowColor = NSColor.white.withAlphaComponent(0.84).cgColor
+    private static let snowballColor = NSColor(srgbRed: 0.86, green: 0.94, blue: 1, alpha: 0.94).cgColor
+    private static let bankBodyColor = NSColor(srgbRed: 0.80, green: 0.89, blue: 0.98, alpha: 0.88).cgColor
+    private static let bankRimColor = NSColor(srgbRed: 0.97, green: 0.99, blue: 1, alpha: 0.91).cgColor
+    private static let rainColor = NSColor(srgbRed: 0.67, green: 0.83, blue: 1, alpha: 0.63).cgColor
+    private static let drizzleColor = NSColor(srgbRed: 0.67, green: 0.83, blue: 1, alpha: 0.42).cgColor
+    private static let splashColor = NSColor(srgbRed: 0.76, green: 0.91, blue: 1, alpha: 1).cgColor
+    private static let puddleColor = NSColor(srgbRed: 0.36, green: 0.67, blue: 0.89, alpha: 1).cgColor
+    private static let leafVeinColor = NSColor(srgbRed: 0.33, green: 0.16, blue: 0.07, alpha: 0.61).cgColor
+    private static let foliagePalette = [false, true].map { petal in
+        (0...4).map { moisture in
+            (0..<32).map { index in
+                let tone = CGFloat(index) / 31
+                let wetness = CGFloat(moisture) / 4
+                return NSColor(hue: petal ? 0.92 + tone * 0.07 : 0.034 + tone * 0.08,
+                               saturation: petal ? 0.42 : 0.83,
+                               brightness: (petal ? 0.99 : 0.77 + tone * 0.19) - wetness * 0.22,
+                               alpha: 0.92).cgColor
+            }
+        }
+    }
+    private static let foliageShapes = [false, true].map { petal -> CGPath in
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: -1.7, y: 0))
+        path.addQuadCurve(to: CGPoint(x: 1.7, y: 0), control: CGPoint(x: 0, y: 1.55))
+        path.addQuadCurve(to: CGPoint(x: -1.7, y: 0), control: CGPoint(x: 0, y: petal ? -1.5 : -0.92))
+        return path
+    }
+    private static let veinShape: CGPath = {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: -1.72, y: 0))
+        path.addQuadCurve(to: CGPoint(x: 1.42, y: 0), control: CGPoint(x: -0.1, y: 0.32))
+        return path
+    }()
+
     private var timer: Timer?
     private var elapsed: CGFloat = 0
     private var lastTick = 0.0
@@ -177,12 +225,14 @@ private final class ParticleView: NSView {
     required init?(coder: NSCoder) { nil }
 
     func start() {
-        guard timer == nil else { return }
+        let interval = style.frameInterval
+        guard timer?.timeInterval != interval else { return }
+        timer?.invalidate()
         lastTick = CACurrentMediaTime()
         nextEdgeSample = 0
-        let tick = Timer(timeInterval: 1.0 / 30, target: self,
+        let tick = Timer(timeInterval: interval, target: self,
                          selector: #selector(redraw), userInfo: nil, repeats: true)
-        tick.tolerance = 0.004
+        tick.tolerance = interval * 0.12
         RunLoop.main.add(tick, forMode: .common)
         timer = tick
     }
@@ -197,7 +247,7 @@ private final class ParticleView: NSView {
 
     @objc private func redraw() {
         let now = CACurrentMediaTime()
-        let dt = min(now - lastTick, 0.067) * (style.reduceMotion ? 0.35 : 1)
+        let dt = min(now - lastTick, max(0.067, style.frameInterval * 1.25)) * (style.reduceMotion ? 0.35 : 1)
         elapsed += dt
         lastTick = now
         if style.effect == .off, style.visit?.expired != false { stop() }
@@ -223,7 +273,7 @@ private final class ParticleView: NSView {
 
         if style.effect != .off, let frame = window?.frame, bounds.width > 0, bounds.height > 0 {
             let heavy = style.effect == .heavySnow
-            let divisor = style.reduceMotion ? 3 : (style.lowPower ? 2 : 1)
+            let divisor = style.particleDivisor
             let count = snowing ? particleBudget(base: heavy ? 290 : 185) / divisor : 0
             let mouse = NSEvent.mouseLocation
             let cursor = CGPoint(x: mouse.x - frame.minX, y: mouse.y - frame.minY)
@@ -347,7 +397,7 @@ private final class ParticleView: NSView {
     }
 
     private func drawFireflies(in context: CGContext) {
-        let divisor = style.reduceMotion ? 3 : (style.lowPower ? 2 : 1)
+        let divisor = style.particleDivisor
         let height = bounds.height + 90
         let width = bounds.width + 120
         let wind = CGFloat(style.wind) * 100
@@ -520,6 +570,7 @@ private final class ParticleView: NSView {
     }
 
     private func omitForeground(on edgeID: Int, in region: CGRect, context: CGContext) {
+        guard style.aboveWindows else { return }
         for window in foregroundWindows[edgeID] ?? [] {
             let covered = region.intersection(window)
             guard !covered.isNull, !covered.isEmpty else { continue }
@@ -539,8 +590,8 @@ private final class ParticleView: NSView {
             let region = CGRect(x: x - width / 2, y: y, width: width, height: 1.2 + patch.water * 1.3)
             context.saveGState()
             omitForeground(on: edge.id, in: region, context: context)
-            context.setFillColor(NSColor(srgbRed: 0.36, green: 0.67, blue: 0.89,
-                                         alpha: min(0.48, patch.water * 0.32)).cgColor)
+            context.setFillColor(Self.puddleColor)
+            context.setAlpha(min(0.48, patch.water * 0.32))
             context.fillEllipse(in: region)
             context.restoreGState()
         }
@@ -560,8 +611,7 @@ private final class ParticleView: NSView {
                 if p.kind.isWater {
                     let featured = p.kind == .rain
                     let trail: CGFloat = featured ? 0.031 : 0.022
-                    context.setStrokeColor(NSColor(srgbRed: 0.67, green: 0.83, blue: 1,
-                                                   alpha: featured ? 0.63 : 0.42).cgColor)
+                    context.setStrokeColor(featured ? Self.rainColor : Self.drizzleColor)
                     context.setLineWidth(p.radius * (featured ? 1.14 : 0.74))
                     context.move(to: p.point)
                     context.addLine(to: CGPoint(x: p.point.x - p.velocity.dx * trail,
@@ -572,11 +622,12 @@ private final class ParticleView: NSView {
                 }
             }
         }
+        context.setFillColor(Self.splashColor)
         for splash in materials.splashes {
-            context.setFillColor(NSColor(srgbRed: 0.76, green: 0.91, blue: 1,
-                                         alpha: min(0.78, splash.life * 4.4)).cgColor)
+            context.setAlpha(min(0.78, splash.life * 4.4))
             context.fillEllipse(in: CGRect(x: splash.point.x - 1, y: splash.point.y - 1, width: 2, height: 2))
         }
+        context.setAlpha(1)
     }
 
     private func drawFoliage(_ p: WeatherMaterials.Particle, at point: CGPoint, wet: CGFloat, in context: CGContext) {
@@ -586,27 +637,21 @@ private final class ParticleView: NSView {
         context.saveGState()
         context.translateBy(x: point.x, y: point.y)
         context.rotate(by: p.angle)
-        context.setFillColor(NSColor(hue: petal ? 0.92 + tone * 0.07 : 0.034 + tone * 0.08,
-                                     saturation: petal ? 0.42 : 0.83,
-                                     brightness: (petal ? 0.99 : 0.77 + tone * 0.19) - wet * 0.22,
-                                     alpha: 0.92).cgColor)
-        context.move(to: CGPoint(x: -1.7 * r, y: 0))
-        context.addQuadCurve(to: CGPoint(x: 1.7 * r, y: 0), control: CGPoint(x: 0, y: r * 1.55))
-        context.addQuadCurve(to: CGPoint(x: -1.7 * r, y: 0), control: CGPoint(x: 0, y: -r * (petal ? 1.5 : 0.92)))
+        context.scaleBy(x: r, y: r)
+        let shape = petal ? 1 : 0
+        context.setFillColor(Self.foliagePalette[shape][Int((wet * 4).rounded())][Int((tone * 31).rounded())])
+        context.addPath(Self.foliageShapes[shape])
         context.fillPath()
         if !petal {
-            context.setStrokeColor(NSColor(srgbRed: 0.33, green: 0.16, blue: 0.07, alpha: 0.61).cgColor)
-            context.setLineWidth(0.55)
-            context.move(to: CGPoint(x: -1.72 * r, y: 0))
-            context.addQuadCurve(to: CGPoint(x: 1.42 * r, y: 0), control: CGPoint(x: -0.1 * r, y: r * 0.32))
+            context.setStrokeColor(Self.leafVeinColor)
+            context.setLineWidth(0.55 / r)
+            context.addPath(Self.veinShape)
             context.strokePath()
         }
         context.restoreGState()
     }
 
     private func drawSnowBanks(in context: CGContext) {
-        let body = NSColor(srgbRed: 0.80, green: 0.89, blue: 0.98, alpha: 0.88).cgColor
-        let rim = NSColor(srgbRed: 0.97, green: 0.99, blue: 1, alpha: 0.91).cgColor
         for bank in snow.banks {
             let base = bank.edge.y
             let maxDepth = bank.depths.max() ?? 0
@@ -645,10 +690,10 @@ private final class ParticleView: NSView {
 
                 context.addPath(contour)
                 context.closePath()
-                context.setFillColor(body)
+                context.setFillColor(Self.bankBodyColor)
                 context.fillPath()
                 context.addPath(contour)
-                context.setStrokeColor(rim)
+                context.setStrokeColor(Self.bankRimColor)
                 context.setLineWidth(0.85)
                 context.strokePath()
             }
@@ -656,13 +701,13 @@ private final class ParticleView: NSView {
     }
 
     private func drawFallingSnow(in context: CGContext) {
-        context.setFillColor(NSColor.white.withAlphaComponent(0.84).cgColor)
+        context.setFillColor(Self.snowColor)
         for flake in snow.flakes {
             let diameter = flake.radius * 2
             context.fillEllipse(in: CGRect(x: flake.position.x - flake.radius, y: flake.position.y - flake.radius,
                                            width: diameter, height: diameter))
         }
-        context.setFillColor(NSColor(srgbRed: 0.86, green: 0.94, blue: 1, alpha: 0.94).cgColor)
+        context.setFillColor(Self.snowballColor)
         for clump in snow.clumps {
             let radius = clump.radius
             context.fillEllipse(in: CGRect(x: clump.position.x - radius, y: clump.position.y - radius,

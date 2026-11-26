@@ -42,7 +42,7 @@
 ## FE-06 · Placement, performance และ lifecycle · P1/P2 · R1/R5
 - มี placement บนเดสก์ท็อปใต้แอปเป็นค่าเริ่มต้น โหมด overlay ด้านหน้าเพิ่มเมื่อทดสอบ ordering และการคลิกผ่านได้ ใช้ display session แยกเพื่อปรับ scale และ frame size
 - มี Pause on battery, Pause while gaming/fullscreen ตามสัญญาณที่ platform ยืนยันได้ และ pause เมื่อ lock/asleep ให้แสดงสาเหตุจากชุดเหตุที่ active พร้อมปุ่ม Resume เฉพาะ manual pause
-- เสนอ cap 30 FPS เริ่มต้น ก่อนเปิด 60/120 ให้ยืนยัน refresh rate และวัด frame time/energy บนเครื่องจริง ไม่วาดจอที่ offline/asleep และ rebuild เฉพาะจอที่เปลี่ยน
+- จำกัดที่ 30 FPS ในโหมดปกติ และ 15 FPS เมื่อใช้แบตเตอรี่ เปิด Low Power Mode หรือ Reduce Motion ก่อนเปิด 60/120 ให้ยืนยัน refresh rate และวัด frame time/energy บนเครื่องจริง ไม่วาดจอที่ offline/asleep และ rebuild เฉพาะจอที่เปลี่ยน
 - เก็บ toggle เปิดเอฟเฟกต์รายจอแยกจาก wallpaper และ placement ของ props แยกจากอนุภาค รองรับโหมดลด particle budget เมื่อใช้แบตหรือ Low Power Mode แม้ผู้ใช้ไม่ได้เลือกพักทั้งหมด
 - ผ่านเมื่อ lock/unlock, fullscreen/notch, สลับ Space, ลากหน้าต่าง และต่อ/ถอดจอไม่เกิด overlay ค้าง ไม่ขวางคลิก และเมื่อสองสาเหตุ pause ซ้อนกันจะ resume หลังเหตุสุดท้ายจบ
 
