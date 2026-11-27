@@ -159,6 +159,7 @@ struct SnowCraft {
 
     private var stacks: [Stack] = []
     private var heldMass: CGFloat = 0
+    private var dragVelocity = CGVector.zero
     private var previousPoint: CGPoint?
     private var observedPress = false
     private var lastCollection: (surface: Int, x: CGFloat)?
@@ -169,7 +170,7 @@ struct SnowCraft {
     private var readyForPress = false
 
     mutating func update(size: CGSize, pointer: CGPoint?, pressed: Bool, dt: CGFloat = 1.0 / 30,
-                         banks: inout [SnowBank]) -> CompletedSnowman? {
+                         inputInterval: CGFloat? = nil, banks: inout [SnowBank]) -> CompletedSnowman? {
         let floor = DesktopEdge(minX: 0, maxX: size.width, y: 0, id: Self.floorID)
         let ledges = banks.map(\.edge).filter { $0.id != Self.floorID }
         let surfaces = ledges + [floor]
@@ -188,8 +189,26 @@ struct SnowCraft {
                 pickUp(at: point)
                 previousPoint = point
             }
-            if observedPress, let previousPoint, hypot(point.x - previousPoint.x, point.y - previousPoint.y) < 340 {
-                collect(from: previousPoint, to: point, banks: &banks)
+            if observedPress, let previousPoint {
+                let dx = point.x - previousPoint.x
+                let dy = point.y - previousPoint.y
+                let distance = hypot(dx, dy)
+                if distance < 340 {
+                    if pressed || distance >= 1 {
+                        let interval = max(1.0 / 120, inputInterval ?? dt)
+                        let edge = support(at: previousPoint, floor: floor, ledges: ledges)
+                        if heldMass >= Self.minimumMass, previousPoint.y - Self.radius(for: heldMass) >= edge.y + 8 {
+                            let retained = exp(-interval * 85)
+                            dragVelocity.dx = retained * dragVelocity.dx + (1 - retained) * dx / interval
+                            dragVelocity.dy = retained * dragVelocity.dy + (1 - retained) * dy / interval
+                        } else {
+                            dragVelocity = .zero
+                        }
+                    }
+                    collect(from: previousPoint, to: point, banks: &banks)
+                } else {
+                    dragVelocity = .zero
+                }
             }
             if observedPress, !pressed {
                 snowman = putDown(at: point, floor: floor, ledges: ledges, banks: &banks)
@@ -197,6 +216,7 @@ struct SnowCraft {
             previousPoint = point
         } else {
             if observedPress, let point = previousPoint {
+                dragVelocity = .zero
                 snowman = putDown(at: point, floor: floor, ledges: ledges, banks: &banks)
             }
             previousPoint = nil
@@ -236,6 +256,7 @@ struct SnowCraft {
         defer {
             observedPress = false
             heldMass = 0
+            dragVelocity = .zero
             lastCollection = nil
         }
 
@@ -246,9 +267,19 @@ struct SnowCraft {
             return nil
         }
 
-        let edge = ledges.filter {
-            point.x >= $0.minX && point.x <= $0.maxX && point.y >= $0.y - 10
-        }.max { $0.y < $1.y } ?? floor
+        let edge = support(at: point, floor: floor, ledges: ledges)
+        let radius = Self.radius(for: heldMass)
+        let speed = hypot(dragVelocity.dx, dragVelocity.dy)
+        if point.y - radius >= edge.y + 8, speed >= 640 {
+            let gain = min(0.46, 820 / speed)
+            if stacks.count >= Self.stackLimit { stacks.removeFirst() }
+            let margin = min(radius, floor.maxX / 2)
+            let x = min(floor.maxX - margin, max(margin, point.x))
+            let launch = CGVector(dx: dragVelocity.dx * gain, dy: dragVelocity.dy * gain)
+            stacks.append(Stack(base: CGPoint(x: x, y: point.y - radius), balls: [heldMass], velocity: launch))
+            return nil
+        }
+
         if let index = stacks.lastIndex(where: { stack in
             guard stack.surface?.id == edge.id, let top = stack.render().last else { return false }
             return abs(point.x - top.center.x) <= top.radius + Self.radius(for: heldMass)
@@ -263,13 +294,18 @@ struct SnowCraft {
         }
 
         if stacks.count >= Self.stackLimit { stacks.removeFirst() }
-        let radius = Self.radius(for: heldMass)
         let margin = edge.id == Self.floorID ? min(radius, floor.maxX / 2) : 0
         let x = min(edge.maxX - margin, max(edge.minX + margin, point.x))
         let airborne = point.y - radius - edge.y > 18
         let y = airborne ? point.y - radius : edge.y
         stacks.append(Stack(base: CGPoint(x: x, y: y), surface: airborne ? nil : edge, balls: [heldMass]))
         return nil
+    }
+
+    private func support(at point: CGPoint, floor: DesktopEdge, ledges: [DesktopEdge]) -> DesktopEdge {
+        ledges.filter {
+            point.x >= $0.minX && point.x <= $0.maxX && point.y >= $0.y - 10
+        }.max { $0.y < $1.y } ?? floor
     }
 
     static func radius(for mass: CGFloat) -> CGFloat { 3 + sqrt(mass) * 0.75 }
