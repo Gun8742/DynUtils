@@ -290,7 +290,7 @@ private final class ParticleView: NSView {
             let pressing = snowing && style.snowCrafting && NSEvent.pressedMouseButtons & 1 != 0
             let crafted = snowing && style.snowCrafting
                 ? snow.updateCraft(&craft, size: bounds.size,
-                                   pointer: bounds.contains(cursor) ? cursor : nil, pressed: pressing, dt: dt)
+                                   pointer: bounds.contains(cursor) ? cursor : nil, pressed: pressing, dt: dt, inputInterval: step)
                 : nil
             let snowmanUpdate: WeatherOverlay.SnowmanUpdate?
             if let crafted {
