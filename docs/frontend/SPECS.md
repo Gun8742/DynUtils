@@ -42,8 +42,8 @@
 ## FE-06 · Placement, performance และ lifecycle · P1/P2 · R1/R5
 - มี placement บนเดสก์ท็อปใต้แอปเป็นค่าเริ่มต้น โหมด overlay ด้านหน้าเพิ่มเมื่อทดสอบ ordering และการคลิกผ่านได้ ใช้ display session แยกเพื่อปรับ scale และ frame size
 - มี Pause on battery, Pause while gaming/fullscreen ตามสัญญาณที่ platform ยืนยันได้ และ pause เมื่อ lock/asleep ให้แสดงสาเหตุจากชุดเหตุที่ active พร้อมปุ่ม Resume เฉพาะ manual pause
-- จำกัดที่ 30 FPS ในโหมดปกติ และ 15 FPS เมื่อใช้แบตเตอรี่ เปิด Low Power Mode หรือ Reduce Motion ก่อนเปิด 60/120 ให้ยืนยัน refresh rate และวัด frame time/energy บนเครื่องจริง ไม่วาดจอที่ offline/asleep และ rebuild เฉพาะจอที่เปลี่ยน
-- เก็บ toggle เปิดเอฟเฟกต์รายจอแยกจาก wallpaper และ placement ของ props แยกจากอนุภาค รองรับโหมดลด particle budget เมื่อใช้แบตหรือ Low Power Mode แม้ผู้ใช้ไม่ได้เลือกพักทั้งหมด
+- ซิงก์เฟรมกับจอ สูงสุด 60 FPS ในโหมดปกติ และ 30 FPS เมื่อเปิด Battery Saver หรือ Reduce Motion ตรวจ frame time และ energy บนเครื่องจริงก่อนเพิ่มเพดาน ไม่วาดจอที่ offline/asleep และ rebuild เฉพาะจอที่เปลี่ยน
+- เก็บ toggle เปิดเอฟเฟกต์รายจอแยกจาก wallpaper และ placement ของ props แยกจากอนุภาค บันทึก Battery Saver แยกจาก Pause on battery เปิดแล้วลดเพดาน FPS และจำนวนอนุภาค ค่าเริ่มต้นคือปิด
 - ผ่านเมื่อ lock/unlock, fullscreen/notch, สลับ Space, ลากหน้าต่าง และต่อ/ถอดจอไม่เกิด overlay ค้าง ไม่ขวางคลิก และเมื่อสองสาเหตุ pause ซ้อนกันจะ resume หลังเหตุสุดท้ายจบ
 
 ## FE-07 · Snow accumulation, desktop surfaces และ snowballs · P2 · R5

@@ -498,7 +498,7 @@ final class DesktopSession: NSObject, ObservableObject, NSApplicationDelegate {
             overlays.removeValue(forKey: key)?.close()
         }
         let reduced = prefs.reduceMotion || workspace.accessibilityDisplayShouldReduceMotion
-        let lowPower = battery || ProcessInfo.processInfo.isLowPowerModeEnabled
+        let lowPower = prefs.batterySaver
         for screen in screens {
             let id = screen.displayKey
             let style = WeatherOverlay.Style(

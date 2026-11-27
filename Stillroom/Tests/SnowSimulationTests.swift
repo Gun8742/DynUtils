@@ -32,7 +32,8 @@ struct SnowSimulationTests {
         rainMeltsExistingSnowWithoutClearingIt()
         foliageStaysOnItsSurfaceAndCanBeSwept()
         rainSplashesAndRunsOffToLowerSurfaces()
-        print("Passed 26 weather, snow, crafting, and decoration regression checks")
+        batterySaverDefaultsOffAndPersists()
+        print("Passed 27 weather, snow, crafting, and decoration regression checks")
     }
 
     private static func localizedImpactAndMovingLedge() {
@@ -585,4 +586,15 @@ struct SnowSimulationTests {
         snow.advance(dt: 1.0 / 30, size: size, count: 0, heavy: false, limits: .standard,
                      wind: wind, pointer: pointer)
     }
+    private static func batterySaverDefaultsOffAndPersists() {
+        var preferences = Preferences()
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        let legacy = try! encoder.encode(preferences)
+        precondition(!(try! decoder.decode(Preferences.self, from: legacy)).batterySaver)
+        preferences.batterySaver = true
+        let saved = try! encoder.encode(preferences)
+        precondition((try! decoder.decode(Preferences.self, from: saved)).batterySaver)
+    }
+
 }

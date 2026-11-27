@@ -335,9 +335,10 @@ private struct Studio: View {
                 get: { session.prefs.effectsAboveWindows == true },
                 set: { session.prefs.effectsAboveWindows = $0 }
             ))
+            Toggle("Battery Saver", isOn: $session.prefs.batterySaver)
             Toggle("Pause on battery", isOn: $session.prefs.pauseOnBattery)
             Toggle("Reduce motion", isOn: $session.prefs.reduceMotion)
-            Text("Weather runs at up to 30 FPS and does not intercept clicks.")
+            Text("Battery Saver limits weather to 30 FPS and reduces particles.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Open at login", isOn: Binding(
                 get: { session.loginStatus == .enabled || session.loginStatus == .requiresApproval },
