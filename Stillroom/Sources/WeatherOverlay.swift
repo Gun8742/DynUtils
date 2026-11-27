@@ -27,7 +27,7 @@ final class WeatherOverlay: NSObject {
         var visit: DesktopVisit?
         var aboveWindows: Bool
 
-        var frameInterval: TimeInterval { 1.0 / (lowPower || reduceMotion ? 15 : 30) }
+        var preferredFPS: Float { lowPower || reduceMotion ? 30 : 60 }
         var particleDivisor: Int { reduceMotion ? 3 : (lowPower ? 2 : 1) }
     }
 
@@ -163,10 +163,11 @@ private final class ParticleView: NSView {
         return path
     }()
 
-    private var timer: Timer?
+    private var frameLink: CADisplayLink?
     private var elapsed: CGFloat = 0
     private var lastTick = 0.0
     private var nextEdgeSample: TimeInterval = 0
+    private var lastEdgeSample: TimeInterval = 0
     private var followWindowsUntil: TimeInterval = 0
     private var edges: [DesktopEdge] = []
     private var foregroundWindows: [Int: [CGRect]] = [:]
@@ -225,31 +226,34 @@ private final class ParticleView: NSView {
     required init?(coder: NSCoder) { nil }
 
     func start() {
-        let interval = style.frameInterval
-        guard timer?.timeInterval != interval else { return }
-        timer?.invalidate()
-        lastTick = CACurrentMediaTime()
+        let frameRate = CAFrameRateRange(minimum: 30, maximum: style.preferredFPS, preferred: style.preferredFPS)
+        if let frameLink {
+            if frameLink.preferredFrameRateRange != frameRate { frameLink.preferredFrameRateRange = frameRate }
+            return
+        }
+        lastTick = 0
         nextEdgeSample = 0
-        let tick = Timer(timeInterval: interval, target: self,
-                         selector: #selector(redraw), userInfo: nil, repeats: true)
-        tick.tolerance = interval * 0.12
-        RunLoop.main.add(tick, forMode: .common)
-        timer = tick
+        let link = displayLink(target: self, selector: #selector(redraw(_:)))
+        link.preferredFrameRateRange = frameRate
+        link.add(to: .main, forMode: .common)
+        frameLink = link
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        frameLink?.invalidate()
+        frameLink = nil
         snow.resetPointer()
         snowman?.resetPointer()
         craft = SnowCraft()
     }
 
-    @objc private func redraw() {
+    @objc private func redraw(_ link: CADisplayLink) {
         let now = CACurrentMediaTime()
-        let dt = min(now - lastTick, max(0.067, style.frameInterval * 1.25)) * (style.reduceMotion ? 0.35 : 1)
+        let frameTime = link.targetTimestamp
+        let step = lastTick == 0 ? frameTime - link.timestamp : frameTime - lastTick
+        let dt = min(max(0, step), 0.067) * (style.reduceMotion ? 0.35 : 1)
         elapsed += dt
-        lastTick = now
+        lastTick = frameTime
         if style.effect == .off, style.visit?.expired != false { stop() }
 
         let material = WeatherMaterials.Kind(style.effect)
@@ -258,17 +262,18 @@ private final class ParticleView: NSView {
         let buttonDown = tracksSnowSurfaces && NSEvent.pressedMouseButtons & 1 != 0
         if buttonDown { followWindowsUntil = now + 0.18 }
         var sampledAt: TimeInterval?
-        if let window, (now >= nextEdgeSample || buttonDown),
+        if let window, now >= nextEdgeSample || (buttonDown && now - lastEdgeSample >= 1.0 / 30 - 0.002),
            tracksSnowSurfaces || [.rain, .sakura, .starfall].contains(style.effect)
                 || (style.visit != nil && style.visit?.visitor == nil) {
             let snapshot = DesktopWindowSampler.snapshot(in: window.frame, at: now)
             sampledAt = now
+            lastEdgeSample = now
             if tracksSnowSurfaces, edges != snapshot.edges { followWindowsUntil = now + 0.18 }
             edges = snapshot.edges
             foregroundWindows = snapshot.foreground
             coveredLedges = snapshot.coveredLedges
             snowWalls = snapshot.snowWalls
-            nextEdgeSample = tracksSnowSurfaces && now < followWindowsUntil ? now : now + 0.06
+            nextEdgeSample = now + (tracksSnowSurfaces && now < followWindowsUntil ? 1.0 / 30 - 0.002 : 0.06)
         }
 
         if style.effect != .off, let frame = window?.frame, bounds.width > 0, bounds.height > 0 {

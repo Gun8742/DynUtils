@@ -97,7 +97,8 @@
 "Rotate" = "หมุน";
 "Tree lights" = "ไฟประดับต้นไม้";
 "Show effects above windows" = "แสดงเอฟเฟกต์เหนือหน้าต่าง";
-"Weather runs at up to 30 FPS and does not intercept clicks." = "เอฟเฟกต์ทำงานสูงสุด 30 FPS และไม่ขวางการคลิก";
+"Battery Saver" = "ประหยัดแบตเตอรี่";
+"Battery Saver limits weather to 30 FPS and reduces particles." = "โหมดประหยัดแบตเตอรี่จำกัดเอฟเฟกต์ที่ 30 FPS และลดจำนวนอนุภาค";
 "Press a key or move the pointer to exit. macOS controls screen locking." = "กดปุ่มหรือขยับตัวชี้เพื่อออก การล็อกหน้าจออยู่ในการควบคุมของ macOS";
 "Effects run independently of your wallpaper unless Match effect is enabled." = "เอฟเฟกต์แยกจากภาพพื้นหลัง ยกเว้นเมื่อเปิดกฎตามเอฟเฟกต์";
 "Choose a demo, then look at the desktop. Closing this guide returns to your selected weather." = "เลือกตัวอย่างแล้วดูที่เดสก์ท็อป เมื่อปิดคู่มือจะกลับไปใช้เอฟเฟกต์ที่เลือกไว้";

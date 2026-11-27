@@ -84,6 +84,11 @@ struct Preferences: Codable {
     var lastEffect: Effect = .snow
     var manualPause = false
     var pauseOnBattery = false
+    private var weatherBatterySaver: Bool?
+    var batterySaver: Bool {
+        get { weatherBatterySaver ?? false }
+        set { weatherBatterySaver = newValue }
+    }
     var reduceMotion = false
     // Optional storage lets existing v1 preferences decode without a density key.
     private var effectDensity: EffectDensity?
