@@ -12,6 +12,8 @@ struct SnowSimulationTests {
         overflowReachesLowerLedge()
         draggingUsesBankSnowAndStacksThreeBalls()
         pickingUpMovesAnExistingBall()
+        flickThrowsSnowballAlongMouseMotion()
+        stationaryReleaseDropsSnowball()
         enteringAnotherDisplayDoesNotStartDrag()
         treeTrunkStaysOnFloor()
         cursorRollsSnowballAndPicksUpMoreSnow()
@@ -33,7 +35,7 @@ struct SnowSimulationTests {
         foliageStaysOnItsSurfaceAndCanBeSwept()
         rainSplashesAndRunsOffToLowerSurfaces()
         batterySaverDefaultsOffAndPersists()
-        print("Passed 27 weather, snow, crafting, and decoration regression checks")
+        print("Passed 29 weather, snow, crafting, and decoration regression checks")
     }
 
     private static func localizedImpactAndMovingLedge() {
@@ -130,6 +132,42 @@ struct SnowSimulationTests {
         _ = craft.update(size: size, pointer: newPosition, pressed: false, banks: &banks)
         precondition(craft.visibleBalls.count == 1 && craft.visibleBalls[0].center.x == newPosition.x)
         precondition(banks[0].depths == bankBefore)
+    }
+
+    private static func flickThrowsSnowballAlongMouseMotion() {
+        for direction: CGFloat in [-1, 1] {
+            var craft = SnowCraft()
+            var banks = [makeCraftBank()]
+            _ = roll(&craft, bank: &banks, to: CGPoint(x: 155, y: 13))
+            let center = craft.visibleBalls[0].center
+            _ = craft.update(size: size, pointer: center, pressed: true, banks: &banks)
+            _ = craft.update(size: size, pointer: CGPoint(x: 150, y: 64), pressed: true, banks: &banks)
+            let release = CGPoint(x: 150 + direction * 28, y: 83)
+            _ = craft.update(size: size, pointer: release, pressed: true, banks: &banks)
+            precondition(craft.update(size: size, pointer: release, pressed: false, banks: &banks) == nil)
+            _ = craft.update(size: size, pointer: nil, pressed: false, banks: &banks)
+            let airborne = craft.visibleBalls[0].center
+            precondition(direction * (airborne.x - release.x) > 2)
+            precondition(airborne.y > release.y)
+        }
+    }
+
+    private static func stationaryReleaseDropsSnowball() {
+        var craft = SnowCraft()
+        var banks = [makeCraftBank()]
+        _ = roll(&craft, bank: &banks, to: CGPoint(x: 155, y: 13))
+        let center = craft.visibleBalls[0].center
+        _ = craft.update(size: size, pointer: center, pressed: true, banks: &banks)
+        _ = craft.update(size: size, pointer: CGPoint(x: 150, y: 64), pressed: true, banks: &banks)
+        let release = CGPoint(x: 183, y: 85)
+        _ = craft.update(size: size, pointer: release, pressed: true, banks: &banks)
+        for _ in 0..<3 {
+            _ = craft.update(size: size, pointer: release, pressed: true, banks: &banks)
+        }
+        _ = craft.update(size: size, pointer: release, pressed: false, banks: &banks)
+        _ = craft.update(size: size, pointer: nil, pressed: false, banks: &banks)
+        let dropped = craft.visibleBalls[0].center
+        precondition(dropped.x == release.x && dropped.y < release.y)
     }
 
     private static func enteringAnotherDisplayDoesNotStartDrag() {
